@@ -4,12 +4,13 @@ const cycleYear = now.getMonth() >= 7 ? now.getFullYear() : now.getFullYear()-1;
 const CONFIG = {
   spreadsheetId: "1wWJXhI2wvO_BQlzvSZRov1deL7FLMMFPlqAV9dDHeqA",
   gid: "1371010002",
+  dataEndpoint: window.LIVEOPS_DATA_ENDPOINT||"",
   cycleStart: new Date(cycleYear, 7, 1),
   cycleEnd: new Date(cycleYear+1, 7, 1)
 };
 
 const TYPE_COLORS = { Sale:"#d07858", Stickers:"#a86d9e", "Season Pass":"#547baa", LTD:"#c39335", Adventure:"#3f8d81", Expedition:"#7b6fa8" };
-const state = { records: [], view:"schedule", search:"", team:"", feature:"", sortBy:"team", showDev:true, showProd:true, windowMonths:6, rangeStart:new Date(now.getFullYear(),now.getMonth(),1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
+const state = { records: [], cellStatuses:{}, view:"schedule", search:"", team:"", feature:"", sortBy:"team", showDev:true, showProd:true, windowMonths:6, rangeStart:new Date(now.getFullYear(),now.getMonth(),1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
 
 function parseCsv(text) {
   const rows=[]; let row=[], cell="", quoted=false;
@@ -48,7 +49,7 @@ function normalize(rows) {
     if (!feature) return null;
     const type=feature.startsWith("Stickers")?"Stickers":feature;
     const sheetRow=index+2;
-    const prodText=(row[4]||"").trim(), devText=(row[5]||"").trim(), statuses=window.LIVEOPS_CELL_STATUS||{};
+    const prodText=(row[4]||"").trim(), devText=(row[5]||"").trim(), statuses=state.cellStatuses;
     return { id:index, sheetRow, month, event, feature, type, title:feature, team:(row[3]||"Unassigned").trim()||"Unassigned", prodText, devText, comment:(row[6]||"").trim(), prod:parseRange(prodText), dev:parseRange(devText), prodSourceStatus:statuses[`${sheetRow}:E`]||statuses[`${feature}|${prodText}:E`]||"", devSourceStatus:statuses[`${sheetRow}:F`]||statuses[`${feature}|${devText}:F`]||"" };
   }).filter(Boolean);
 }
@@ -57,16 +58,30 @@ async function loadData() {
   const status=document.querySelector("#syncStatus");
   const url=`https://docs.google.com/spreadsheets/d/${CONFIG.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${CONFIG.gid}`;
   try {
-    const response=await fetch(url,{cache:"no-store"});
+    const response=await fetch(CONFIG.dataEndpoint||url,{cache:"no-store"});
     if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const rows=parseCsv(await response.text());
+    let rows;
+    if (CONFIG.dataEndpoint) {
+      const payload=await response.json(); rows=payload.rows;
+      state.cellStatuses=statusesFromBackgrounds(payload.backgrounds||[]);
+    } else rows=parseCsv(await response.text());
     if (rows.length<2 || rows[0][0]!=="Month") throw new Error("Unexpected sheet format");
-    state.records=normalize(rows); status.classList.add("live"); status.lastElementChild.textContent="Live sheet connected";
+    state.records=normalize(rows); status.classList.add("live"); status.lastElementChild.textContent=CONFIG.dataEndpoint?"Live values + colors":"Live values · colors unavailable";
   } catch (error) {
-    state.records=normalize(window.LIVEOPS_SNAPSHOT||[]); status.classList.add("error"); status.lastElementChild.textContent="Snapshot · live access unavailable";
-    console.info("Live Sheet unavailable; using bundled snapshot.",error);
+    state.records=[]; status.classList.add("error"); status.lastElementChild.textContent="Live sheet unavailable";
+    console.error("Live Sheet unavailable.",error);
   }
   populateFilters(); render();
+}
+
+function statusesFromBackgrounds(backgrounds) {
+  const statuses={};
+  backgrounds.forEach((row,rowIndex)=>[4,5].forEach(columnIndex=>{
+    const color=String(row[columnIndex]||"").toLowerCase();
+    const status=color==="#d9ead3"?"green":color==="#ffff00"?"yellow":color==="#ff0000"?"red":"";
+    if (status) statuses[`${rowIndex+1}:${columnIndex===4?'E':'F'}`]=status;
+  }));
+  return statuses;
 }
 
 function filtered() {
@@ -165,9 +180,9 @@ function scheduleGroups(records) {
   });
 }
 
-function scheduleBar(record) {
+function scheduleBar(record,label) {
   const left=offset(record.prod.start), width=Math.max(.5,offset(new Date(record.prod.end.getTime()+86400000))-left), status=scheduleStatus(record,"prod");
-  return `<button class="bar prod status-${status}" data-id="${record.id}" style="left:${left}%;width:${width}%" title="${escapeHtml(record.event||record.feature)} · ${record.prodText}">${escapeHtml(record.event||"PROD")} · ${duration(record.prod)}d</button>`;
+  return `<button class="bar prod status-${status}" data-id="${record.id}" style="left:${left}%;width:${width}%" title="${escapeHtml(label)} · ${record.prodText}">${escapeHtml(label)} · ${duration(record.prod)}d</button>`;
 }
 
 function renderSchedule(records) {
@@ -175,7 +190,7 @@ function renderSchedule(records) {
   const line=todayVisible?`<i class="today-line" style="left:${offset(today)}%"></i>`:"";
   const groups=scheduleGroups(records);
   if (!groups.length) return '<div class="empty-state">No production windows in this period.</div>';
-  return `<div class="timeline" style="--month-count:${months.length}"><div class="timeline-header"><div>Production feature</div>${months.map(m=>`<div>${m.toLocaleDateString('en-US',{month:'short'})}<br>${m.getFullYear()}</div>`).join("")}</div>${groups.map(group=>`<div class="timeline-row schedule-row"><div class="event-label" data-id="${group.records[0].id}" style="--type-color:${TYPE_COLORS[group.records[0].type]||'#82909a'}"><i class="type-rail"></i><span><strong>${escapeHtml(group.feature)}</strong><small>${group.records.length} production window${group.records.length===1?'':'s'} · ${escapeHtml(group.teams.join(', '))}</small></span></div><div class="track">${line}${group.records.map(scheduleBar).join("")}</div></div>`).join("")}</div>`;
+  return `<div class="timeline" style="--month-count:${months.length}"><div class="timeline-header"><div>Production feature</div>${months.map(m=>`<div>${m.toLocaleDateString('en-US',{month:'short'})}<br>${m.getFullYear()}</div>`).join("")}</div>${groups.map(group=>`<div class="timeline-row schedule-row"><div class="event-label" data-id="${group.records[0].id}" style="--type-color:${TYPE_COLORS[group.records[0].type]||'#82909a'}"><i class="type-rail"></i><span><strong>${escapeHtml(group.feature)}</strong><small>${group.records.length} production window${group.records.length===1?'':'s'} · ${escapeHtml(group.teams.join(', '))}</small></span></div><div class="track">${line}${group.records.map(record=>scheduleBar(record,record.feature)).join("")}</div></div>`).join("")}</div>`;
 }
 
 function timelineBar(record,range,kind) {

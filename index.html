@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="description" content="LiveOps production and development calendar">
+  <title>LiveOps Calendar</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Manrope:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header class="topbar">
+    <div class="brand"><span class="brand-mark">LO</span><span>LiveOps Calendar</span></div>
+    <div class="top-actions">
+      <span class="sync-pill" id="syncStatus"><span class="sync-dot"></span><span>Loading schedule</span></span>
+      <a class="icon-button" id="sheetLink" href="https://docs.google.com/spreadsheets/d/1wWJXhI2wvO_BQlzvSZRov1deL7FLMMFPlqAV9dDHeqA/edit?gid=1371010002" target="_blank" rel="noreferrer" title="Open source sheet" aria-label="Open source sheet">↗</a>
+    </div>
+  </header>
+
+  <main>
+    <section class="summary">
+      <div><p class="eyebrow" id="rangeLabel"></p><h1>Release overview</h1><p class="subtitle">Development and production windows in one operational timeline.</p></div>
+      <div class="metrics" id="metrics"></div>
+    </section>
+
+    <section class="controls" aria-label="Calendar controls">
+      <div class="view-switch" role="group" aria-label="View mode">
+        <button class="active" data-view="schedule">Schedule</button>
+        <button data-view="timeline">Development</button>
+        <button data-view="list">List</button>
+      </div>
+      <label class="search"><span>⌕</span><input id="searchInput" type="search" placeholder="Search events, features, teams…"></label>
+      <select id="teamFilter" aria-label="Filter by team"><option value="">All teams</option></select>
+      <select id="featureFilter" aria-label="Filter by feature"><option value="">All features</option></select>
+      <select id="windowFilter" aria-label="Time window">
+        <option value="1">Next month</option>
+        <option value="2">Next 2 months</option>
+        <option value="3">Next 3 months</option>
+        <option value="4">Next 4 months</option>
+        <option value="5">Next 5 months</option>
+        <option value="6" selected>Next 6 months</option>
+        <option value="9">Next 9 months</option>
+        <option value="12">Next 12 months</option>
+      </select>
+      <button class="today-button" id="todayButton">Today</button>
+    </section>
+
+    <div class="legend" aria-label="Schedule visibility">
+      <label class="schedule-toggle dev-toggle"><input id="showDev" type="checkbox" checked><span class="checkmark">✓</span><i class="legend-line dev"></i> Development</label>
+      <label class="schedule-toggle prod-toggle"><input id="showProd" type="checkbox" checked><span class="checkmark">✓</span><i class="legend-line prod"></i> Production</label>
+      <label class="sort-control">Sort by
+        <select id="sortFilter" aria-label="Sort schedule">
+          <option value="team" selected>Team</option>
+          <option value="feature">Feature</option>
+          <option value="month">Month</option>
+          <option value="holiday">Holiday</option>
+        </select>
+      </label>
+      <span class="status-key"><i class="status-swatch status-red"></i> Late</span>
+      <span class="status-key"><i class="status-swatch status-grey"></i> Upcoming</span>
+      <span class="status-key"><i class="status-swatch status-green"></i> Done</span>
+      <span><i class="missing-mark">!</i> Schedule incomplete</span>
+    </div>
+
+    <section class="calendar-shell" id="calendarShell">
+      <div class="empty-state" id="loadingState">Loading LiveOps data…</div>
+    </section>
+  </main>
+
+  <dialog id="detailDialog">
+    <button class="dialog-close" aria-label="Close">×</button>
+    <div id="dialogContent"></div>
+  </dialog>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -163,7 +163,7 @@ function renderMetrics(records) {
 function scheduleGroups(records) {
   const byFeature=new Map();
   records.filter(r=>overlaps(r.prod)).forEach(record=>{
-    const feature=record.feature.toLowerCase().startsWith("stickers")?"Stickers":record.feature;
+    const feature=canonicalScheduleFeature(record.feature);
     if (!byFeature.has(feature)) byFeature.set(feature,{feature,records:[]});
     byFeature.get(feature).records.push(record);
   });
@@ -178,6 +178,15 @@ function scheduleGroups(records) {
     if (state.sortBy==="holiday") return (a.holidays[0]||"No holiday").localeCompare(b.holidays[0]||"No holiday")||a.feature.localeCompare(b.feature);
     return a.teams.join(", ").localeCompare(b.teams.join(", "))||a.feature.localeCompare(b.feature);
   });
+}
+
+function canonicalScheduleFeature(feature) {
+  const normalized=feature.trim().toLowerCase();
+  if (normalized.startsWith("stickers")) return "Stickers";
+  if (normalized.startsWith("ltd")) return "LTD";
+  if (normalized.startsWith("season pass")) return "Season Pass";
+  if (normalized.startsWith("sale")) return "Sale";
+  return feature.trim();
 }
 
 function scheduleBar(record,label) {

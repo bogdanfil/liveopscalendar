@@ -31,11 +31,19 @@ function parseCsv(text) {
 
 function parseRange(value) {
   if (!value) return null;
-  const parts=String(value).trim().match(/(\d{1,2})\.(\d{1,2})\s*-\s*(\d{1,2})\.(\d{1,2})/);
+  const text=String(value).replace(/&(?:nbsp|#0*32|#x0*20);/gi,' ').trim();
+  const parts=text.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\s*[-–—]\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$/);
   if (!parts) return null;
-  const make=(day,month)=>new Date(Number(month)>=8?cycleYear:cycleYear+1,Number(month)-1,Number(day));
-  const start=make(parts[1],parts[2]); let end=make(parts[3],parts[4]);
-  if (end<start) end=new Date(end.getFullYear()+1,end.getMonth(),end.getDate());
+  const [,startDay,startMonth,startYearText,endDay,endMonth,endYearText]=parts.map(Number);
+  const crossesYear=endMonth<startMonth||(endMonth===startMonth&&endDay<startDay);
+  const startYear=startYearText||(endYearText?endYearText-Number(crossesYear):startMonth>=8?cycleYear:cycleYear+1);
+  const endYear=endYearText||startYear+Number(crossesYear);
+  const make=(day,month,year)=>{
+    const date=new Date(year,month-1,day);
+    return date.getFullYear()===year&&date.getMonth()===month-1&&date.getDate()===day?date:null;
+  };
+  const start=make(startDay,startMonth,startYear), end=make(endDay,endMonth,endYear);
+  if (!start||!end||end<start) return null;
   return { start, end };
 }
 

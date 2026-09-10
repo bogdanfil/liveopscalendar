@@ -20,4 +20,6 @@ The public CSV feed does not include cell backgrounds. To load values and colors
 
 The endpoint reads the sheet at request time; no spreadsheet data is bundled into the site.
 
-The planning cycle is configured as August 2026 through July 2027 in `app.js`.
+The planning cycle runs from August through July and is inferred from the current year in `app.js`. Use the From and To date pickers to select an inclusive display range; this does not change the planning year inferred for yearless sheet dates.
+
+Schedule shows production windows, with yellow bars for features currently in development. Entries without production dates appear as dashed placeholders in their feature rows, using the planned month where available. Red exclamation icons flag missing development or production dates. Feature details include a link to the feature's cell in column C of the source sheet.

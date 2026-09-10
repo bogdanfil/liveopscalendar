@@ -32,12 +32,14 @@ function parseCsv(text) {
 function parseRange(value) {
   if (!value) return null;
   const text=String(value).replace(/&(?:nbsp|#0*32|#x0*20);/gi,' ').trim();
-  const parts=text.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?\s*[-–—]\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{4}))?$/);
+  const parts=text.match(/^(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?\s*[-–—]\s*(\d{1,2})\.(\d{1,2})(?:\.(\d{4}|\d{2}))?$/);
   if (!parts) return null;
-  const [,startDay,startMonth,startYearText,endDay,endMonth,endYearText]=parts.map(Number);
+  const [,startDay,startMonth,,endDay,endMonth]=parts.map(Number);
+  const parseYear=year=>year===undefined?null:Number(year)+(year.length===2?2000:0);
+  const startYearText=parseYear(parts[3]), endYearText=parseYear(parts[6]);
   const crossesYear=endMonth<startMonth||(endMonth===startMonth&&endDay<startDay);
-  const startYear=startYearText||(endYearText?endYearText-Number(crossesYear):startMonth>=8?cycleYear:cycleYear+1);
-  const endYear=endYearText||startYear+Number(crossesYear);
+  const startYear=startYearText??(endYearText!==null?endYearText-Number(crossesYear):startMonth>=8?cycleYear:cycleYear+1);
+  const endYear=endYearText??startYear+Number(crossesYear);
   const make=(day,month,year)=>{
     const date=new Date(year,month-1,day);
     return date.getFullYear()===year&&date.getMonth()===month-1&&date.getDate()===day?date:null;
@@ -302,7 +304,8 @@ function scheduleRow(group,line) {
     const top=16+lane*32;
     if (record.prod) return scheduleBar(record,record.feature,top);
     const description=missingDateLabel(record);
-    return `<button class="bar unplanned needs-planning" data-id="${record.id}" style="left:${left}%;width:${width}%;top:${top}px" title="${escapeHtml(record.feature)} · ${escapeHtml(record.month)} · ${description}" aria-label="${escapeHtml(record.feature)} · ${escapeHtml(record.month)} · ${description}">${escapeHtml(record.feature)} · ${description} ${planningWarning(record)}</button>`;
+    const devDone=scheduleStatus(record,'dev')==='green';
+    return `<button class="bar unplanned needs-planning${devDone?' status-green':''}" data-id="${record.id}" style="left:${left}%;width:${width}%;top:${top}px" title="${escapeHtml(record.feature)} · ${escapeHtml(record.month)} · ${devDone?'Dev done · ':''}${description}" aria-label="${escapeHtml(record.feature)} · ${escapeHtml(record.month)} · ${devDone?'Dev done · ':''}${description}">${escapeHtml(record.feature)} · ${description} ${planningWarning(record)}</button>`;
   }).join('');
   const missing=group.records.find(record=>!record.dev||!record.prod);
   const scheduled=group.records.filter(record=>record.prod).length;

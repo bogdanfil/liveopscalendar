@@ -99,6 +99,7 @@ select,.date-control input { height:36px; padding:0 12px; border:1px solid var(-
 .bar .warning { position:absolute; right:3px; top:3px; }
 .bar.needs-planning { padding-right:24px; }
 .bar.unplanned { background:#fff6f5; border:1px dashed #c77a75; color:#823c37; box-shadow:none; text-align:left; }
+.bar.unplanned.status-green { color:#fff; border-color:#356d41; }
 .sheet-cell-link { display:inline-block; margin-top:20px; color:var(--accent); font-weight:600; }
 .bar { position:absolute; height:23px; min-width:5px; padding:4px 8px; overflow:hidden; border:0; border-radius:4px; color:#fff; box-shadow:0 1px 2px #182a3428; font-size:11px; font-weight:700; line-height:15px; white-space:nowrap; cursor:pointer; }
 .bar.dev { top:7px; background:var(--dev); color:#302405; }

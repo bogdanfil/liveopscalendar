@@ -22,6 +22,6 @@ The endpoint reads the sheet at request time; no spreadsheet data is bundled int
 
 The planning cycle runs from August through July and is inferred from the current year in `app.js`. Use the From and To date pickers to select an inclusive display range; this does not change the planning year inferred for yearless sheet dates.
 
-Sheet date ranges accept both `01.02 - 20.02` and `01.02.2027 - 20.02.2027`. Explicit years take precedence over the inferred planning cycle. A year on just one end of the range is also supported, including December–January ranges. Invalid dates are treated as missing dates.
+Sheet date ranges accept `01.02 - 20.02`, `01.02.27 - 20.02.27`, and `01.02.2027 - 20.02.2027`. Two-digit years mean 2000–2099. Explicit years take precedence over the inferred planning cycle. A year on just one end of the range is also supported, including December–January ranges. Invalid dates are treated as missing dates. Green development cells mark work as done, including historical development dates; any missing production date remains flagged separately.
 
 Schedule shows production windows, with yellow bars for features currently in development. Entries without production dates appear as dashed placeholders in their feature rows, using the planned month where available. Red exclamation icons flag missing development or production dates. Feature details include a link to the feature's cell in column C of the source sheet.

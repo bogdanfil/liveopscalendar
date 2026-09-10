@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const context = vm.createContext({ window: {} });
-vm.runInContext(source.slice(0, source.indexOf('function normalize(')), context);
+vm.runInContext(source.slice(0, source.indexOf('document.querySelectorAll("[data-view]")')), context);
 const parseRange = vm.runInContext('parseRange', context);
 const cycleYear = vm.runInContext('cycleYear', context);
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
@@ -16,6 +16,38 @@ test('LTD full-year range preserves its explicit dates and 20-day duration', () 
   assert.equal(date(range.start), '2027-02-01');
   assert.equal(date(range.end), '2027-02-20');
   assert.equal(Math.round((range.end - range.start) / 86400000) + 1, 20);
+});
+
+test('two-digit years in the exact LTD cells mean January 2026', () => {
+  const range = parseRange('1.01.26 - 20.01.26');
+  assert.equal(date(range.start), '2026-01-01');
+  assert.equal(date(range.end), '2026-01-20');
+  for (const value of ['1.01.26 - 20.01.2026', '1.01.2026 - 20.01.26', '1.01 - 20.01.26', '1.01.26 - 20.01']) {
+    assert.equal(date(parseRange(value).start), '2026-01-01');
+    assert.equal(date(parseRange(value).end), '2026-01-20');
+  }
+  assert.equal(date(parseRange('20.12.26 - 06.01.27').end), '2027-01-06');
+});
+
+test('green historical LTD development removes the dev warning and marks production green', () => {
+  const read = vm.runInContext(`(rows, backgrounds) => {
+    state.cellStatuses = statusesFromBackgrounds(backgrounds);
+    return normalize(rows).map(record => ({
+      dev: record.dev, warning: missingDateLabel(record),
+      devStatus: scheduleStatus(record, 'dev'), prodStatus: scheduleStatus(record, 'prod')
+    }));
+  }`, context);
+  const records = read([
+    ['Month', 'Event', 'Feature', 'Development Team', 'Prod Dates', 'Dev Dates'],
+    ['October', 'Halloween', 'LTD', 'LiveOps', '1.10 - 20.10', '1.01.26 - 20.01.26'],
+    ['September', 'Back to School', 'LTD', 'LiveOps', '', '1.01.26 - 20.01.26']
+  ], [[], ['', '', '', '', '#ffffff', '#d9ead3'], ['', '', '', '', '#ffffff', '#d9ead3']]);
+  assert.equal(date(records[0].dev.start), '2026-01-01');
+  assert.equal(records[0].warning, '');
+  assert.equal(records[0].devStatus, 'green');
+  assert.equal(records[0].prodStatus, 'green');
+  assert.equal(records[1].warning, 'No Prod Date');
+  assert.equal(records[1].devStatus, 'green');
 });
 
 test('short ranges retain planning-cycle inference', () => {

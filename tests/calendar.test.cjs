@@ -147,6 +147,8 @@ test('late development stays visible after its deadline and has an independent t
   const counts=()=>Array.from(run(`state.records.map(record=>scheduleEntries(record).filter(entry=>entry.kind==='dev').length)`));
   assert.deepEqual(counts(),[1,0,1,0,0]);
   assert.equal(run(`scheduleStatus(state.records[0],'dev')`),'red');
+  assert.match(run("featureBar(state.records[0],state.records[0].dev,'dev',14,true)"),/class="late-dev-clock"/);
+  assert.doesNotMatch(run("featureBar(state.records[0],state.records[0].prod,'prod',14)"),/class="late-dev-clock"/);
   run('state.showLate=false');
   assert.deepEqual(counts(),[0,0,0,0,0]);
   run('state.showLate=true;state.showDev=false;state.showPlanned=false;state.showEstimates=false');
@@ -171,6 +173,24 @@ test('same-team alerts check only development, including estimates and shared bo
   assert.equal(iso(manual.start),'2026-09-20');
   assert.equal(iso(manual.end),'2026-09-20');
   assert.ok(conflicts.every(conflict=>conflict.a.id!==conflict.b.id&&conflict.a.team==='Team'&&conflict.b.team==='Team'));
+});
+
+test('team overlap uses its own icon and coexists with date warnings',()=>{
+  const {run}=setup();
+  run(`state.records=normalize(${JSON.stringify([headers,
+    ['November','','First','Team','Track','1.11.26 - 20.11.26','1.10.26 - 14.10.26'],
+    ['November','','Second','Team','Track','1.11.26 - 20.11.26','1.10.26 - 14.10.26']])});state.conflicts=findTeamConflicts(state.records);`);
+  const conflictOnly=run('planningWarning(state.records[0])');
+  assert.match(conflictOnly,/class="conflict-mark"/);
+  assert.match(conflictOnly,/<svg/);
+  assert.doesNotMatch(conflictOnly,/class="warning"/);
+  run('state.records[0].prod=null;state.records[0].prodText=""');
+  const both=run('planningWarning(state.records[0])');
+  assert.match(both,/class="warning"/);
+  assert.match(both,/class="conflict-mark"/);
+  assert.match(run('warningList(state.records[0])'),/No Prod Date/);
+  run('state.records[0].devSourceStatus="green";state.conflicts=findTeamConflicts(state.records)');
+  assert.doesNotMatch(run('planningWarning(state.records[0])'),/conflict-mark/);
 });
 
 test('completed features never cause overlap warnings for themselves or unfinished features',()=>{

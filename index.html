@@ -39,11 +39,12 @@
         <div class="date-control"><label for="rangeStart">From</label><div class="date-input"><input id="rangeStart" type="date" aria-label="Start date" required><button type="button" class="calendar-button" data-date-picker="rangeStart" aria-label="Open start date calendar" title="Choose start date"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18M7 15h3m4 0h3M7 18h3"/></svg></button></div></div>
         <div class="date-control"><label for="rangeEnd">To</label><div class="date-input"><input id="rangeEnd" type="date" aria-label="End date" required><button type="button" class="calendar-button" data-date-picker="rangeEnd" aria-label="Open end date calendar" title="Choose end date"><svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M7 3v4m10-4v4M3 11h18M7 15h3m4 0h3M7 18h3"/></svg></button></div></div>
       </div>
-      <span class="status-key"><i class="legend-icon status-red">!</i> Late</span>
+      <span class="status-key"><i id="lateLegendIcon" class="late-mark" aria-hidden="true"></i> Late</span>
       <span class="status-key"><i class="legend-icon status-grey">◷</i> Planned</span>
       <span class="status-key"><i class="legend-icon status-yellow">⚙</i> In progress</span>
       <span class="status-key"><i class="legend-icon status-green">✓</i> Done</span>
       <span><i class="missing-mark">!</i> Needs attention</span>
+      <span><i id="overlapLegendIcon" class="conflict-mark" aria-hidden="true"></i> Team overlap</span>
     </div>
 
     <div class="range-summary"><span id="rangeLabel"></span><span id="resultCount"></span></div>

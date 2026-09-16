@@ -71,8 +71,19 @@ function featureBar(record,range,kind,top,overlay=false) {
   const caption=kind==='missing'?`${record.feature} · ${missingDateLabel(record)}`:`${record.feature}${estimated?' · Estimated':''}`;
   const label=`${record.feature} · ${phaseName(kind)} · ${kind==='missing'?statusLabel(status):phaseStatusLabel(record,kind)}${estimated?' · Estimated dates':''}`;
   const warning=warnings.length?planningWarning(record):'';
+  const overdue=kind==='dev'&&status==='red'?`<span class="late-dev-clock" title="Development overdue">${statusIcon('red')}</span>`:'';
   const icons=`<span class="bar-adornment bar-status">${statusIcon(status)}</span>`;
-  return `<button class="bar ${kind==='missing'?'unplanned':kind} status-${status}${overlay?' dev-overlay':''}${estimated?' estimated':''}${warnings.length?' needs-planning':''}" data-id="${record.id}" data-kind="${kind}" style="left:${left}%;width:${width}%;top:${top}px" aria-label="${escapeHtml(label)}">${icons}<span class="bar-label">${escapeHtml(caption)}</span>${warning?`<span class="bar-adornment bar-alert">${warning}</span>`:''}</button>`;
+  return `<button class="bar ${kind==='missing'?'unplanned':kind} status-${status}${overlay?' dev-overlay':''}${estimated?' estimated':''}${warnings.length?' needs-planning':''}" data-id="${record.id}" data-kind="${kind}" style="left:${left}%;width:${width}%;top:${top}px" aria-label="${escapeHtml(label)}"><span class="bar-label"><span class="bar-text">${escapeHtml(caption)}</span></span>${icons}${warning||overdue?`<span class="bar-adornment bar-alert${warning?'':' late-only'}">${overdue}${warning}</span>`:''}</button>`;
+}
+
+function fitBarStatusIcons(container) {
+  container.querySelectorAll('.bar').forEach(bar=>{
+    const text=bar.querySelector('.bar-text');
+    // Tighten spacing before hiding an icon: a short name can fit on a small bar.
+    const available=bar.clientWidth-text.getBoundingClientRect().width;
+    bar.classList.toggle('has-status',available>=26);
+    bar.classList.toggle('compact-status',available>=26&&available<38);
+  });
 }
 
 const SCHEDULE_LANE_STEP=55;
@@ -209,11 +220,12 @@ function layoutScheduleEntries(source,trackWidth=1000) {
   for (const development of [false,true]) {
     const laneEnds=[];
     for (const entry of entries.filter(entry=>(entry.kind==='dev')===development)) {
-      // Icons occupy real space on both sides without changing the date width.
-      const iconSpace=27/trackWidth*100;
-      let lane=laneEnds.findIndex(end=>end<=entry.left-iconSpace);
+      // Reserve the external warning without changing the date width.
+      const alertCount=new Set(recordAlerts(entry.record).map(alert=>alert.kind)).size+Number(entry.kind==='dev'&&scheduleStatus(entry.record,'dev')==='red');
+      const warningSpace=(alertCount?25+(alertCount-1)*23:0)/trackWidth*100;
+      let lane=laneEnds.findIndex(end=>end<=entry.left);
       if (lane<0) lane=laneEnds.length;
-      laneEnds[lane]=entry.left+entry.width+(recordWarnings(entry.record).length?iconSpace:0);
+      laneEnds[lane]=entry.left+entry.width+warningSpace;
       positioned.push({...entry,top:14+(laneOffset+lane)*SCHEDULE_LANE_STEP});
     }
     laneOffset+=laneEnds.length;
@@ -227,8 +239,13 @@ function scheduleRow(group,line,trackWidth=1000) {
   const connections=scheduleConnections(entries);
   const height=Math.max(62,...entries.map(entry=>entry.top+25+14),...connections.flatMap(connection=>connection.points.map(point=>point.y+12)));
   const connectors=developmentConnectors(entries,height-1,connections);
-  const warning=group.records.find(record=>recordWarnings(record).length);
-  return `<div class="timeline-row schedule-row" style="min-height:${height}px"><div class="event-label" style="--type-color:${trackColor(group.track)}"><i class="type-rail"></i><span><strong>${escapeHtml(group.track)}</strong><small>${group.records.length} feature${group.records.length===1?'':'s'}</small><small>${escapeHtml(group.teams.join(', '))}</small></span>${warning?`<button class="feature-warning" data-id="${warning.id}" title="${escapeHtml(recordWarnings(warning).join(' · '))}" aria-label="${escapeHtml(group.track)}: review warnings">!</button>`:''}</div><div class="track">${line}${connectors}${bars}</div></div>`;
+  const warnings=['planning','conflict'].map(kind=>{
+    const record=group.records.find(record=>recordAlerts(record).some(alert=>alert.kind===kind));
+    if (!record) return '';
+    const label=recordAlerts(record).filter(alert=>alert.kind===kind).map(alert=>alert.text).join(' · ');
+    return `<button class="track-alert" data-id="${record.id}" title="${escapeHtml(label)}" aria-label="${escapeHtml(group.track)}: ${kind==='conflict'?'review team overlaps':'review warnings'}">${alertIcon(kind)}</button>`;
+  }).join('');
+  return `<div class="timeline-row schedule-row" style="min-height:${height}px"><div class="event-label" style="--type-color:${trackColor(group.track)}"><i class="type-rail"></i><span><strong>${escapeHtml(group.track)}</strong><small>${group.records.length} feature${group.records.length===1?'':'s'}</small><small>${escapeHtml(group.teams.join(', '))}</small></span><div class="track-alerts">${warnings}</div></div><div class="track">${line}${connectors}${bars}</div></div>`;
 }
 
 function timelineHeader(months,label) {
@@ -245,8 +262,9 @@ function renderSchedule(records) {
   const shell=document.querySelector('#calendarShell');
   const labelWidth=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--label'))||248;
   const timelineWidth=Math.max(shell.clientWidth,980,248+months.length*92);
-  const trackWidth=Math.max(1,timelineWidth-labelWidth-56);
-  return `<div class="timeline schedule-layout" style="${timelineStyle(months)}">${timelineHeader(months,'Track')}${groups.map(group=>scheduleRow(group,line,trackWidth)).join('')}</div>`;
+  const alertGutter=groups.some(group=>group.entries.some(entry=>entry.kind==='dev'&&scheduleStatus(entry.record,'dev')==='red'))?72:48;
+  const trackWidth=Math.max(1,timelineWidth-labelWidth-alertGutter);
+  return `<div class="timeline schedule-layout" style="${timelineStyle(months)};--alert-gutter:${alertGutter}px">${timelineHeader(months,'Track')}${groups.map(group=>scheduleRow(group,line,trackWidth)).join('')}</div>`;
 }
 
 function renderTimeline(records) {
@@ -284,7 +302,7 @@ function renderAlerts(records) {
   const counts=[late.length?`${late.length} late feature${late.length===1?'':'s'}`:'',conflicts.length?`${conflicts.length} team overlap${conflicts.length===1?'':'s'}`:''].filter(Boolean).join(' · ');
   const lateRows=late.map(({record,phases})=>`<div class="conflict-item"><strong>${escapeHtml(record.team)}</strong><div><button data-id="${record.id}">${escapeHtml(record.feature)} (${escapeHtml(record.month)})</button>${phases.map(({kind,range})=>`<small>${kind==='dev'?'Late dev':'Late production'}${kind==='dev'&&!record.dev?' · Estimated':''} · ${formatDate(range.start)} — ${formatDate(range.end)}</small>`).join('')}</div></div>`).join('');
   const overlapRows=conflicts.map(conflict=>`<div class="conflict-item"><strong>${escapeHtml(conflict.a.team)}</strong><div><button data-id="${conflict.a.id}">${escapeHtml(conflict.a.feature)} (${escapeHtml(conflict.a.month)})</button><span> overlaps </span><button data-id="${conflict.b.id}">${escapeHtml(conflict.b.feature)} (${escapeHtml(conflict.b.month)})</button><small>${escapeHtml(conflictDescription(conflict))}</small></div></div>`).join('');
-  panel.innerHTML=counts?`<details ${expanded?'open':''}><summary><span class="warning">!</span> ${counts} in this date range <span class="alert-hint">Review alerts</span></summary><div class="conflict-list">${late.length?'<h3>Late features</h3>':''}${lateRows}${conflicts.length?'<h3>Team overlaps</h3>':''}${overlapRows}</div></details>`:'';
+  panel.innerHTML=counts?`<details ${expanded?'open':''}><summary>${late.length?statusIcon('red'):''}${conflicts.length?alertIcon('conflict'):''} ${counts} in this date range <span class="alert-hint">Review alerts</span></summary><div class="conflict-list">${late.length?'<h3>Late features</h3>':''}${lateRows}${conflicts.length?`<h3>${alertIcon('conflict')} Team overlaps</h3>`:''}${overlapRows}</div></details>`:'';
   panel.hidden=!counts;
 }
 
@@ -308,7 +326,7 @@ function showTooltip(element) {
   const label=kind==='missing'?statusLabel(status):phaseStatusLabel(record,kind);
   const showDevDates=kind==='dev'||label==='Late dev';
   const devRange=developmentRange(record);
-  tooltip.innerHTML=`<strong>${escapeHtml(record.feature)}</strong><div class="tooltip-status">${statusIcon(status)} ${label}${status==='red'?'':` · ${phaseName(kind)}`}${showDevDates&&!record.dev?' · Estimated':''}</div><small>${escapeHtml(record.team)} · ${escapeHtml(record.track||'No track')}<br>Production: ${productionDates}${showDevDates&&devRange?`<br>Development: ${formatDate(devRange.start)} — ${formatDate(devRange.end)}`:''}</small><p>${escapeHtml(record.comment)||'No description provided.'}</p>${warnings.length?`<ul>${warnings.map(warning=>`<li>! ${escapeHtml(warning)}</li>`).join('')}</ul>`:''}`;
+  tooltip.innerHTML=`<strong>${escapeHtml(record.feature)}</strong><div class="tooltip-status">${statusIcon(status)} ${label}${status==='red'?'':` · ${phaseName(kind)}`}${showDevDates&&!record.dev?' · Estimated':''}</div><small>${escapeHtml(record.team)} · ${escapeHtml(record.track||'No track')}<br>Production: ${productionDates}${showDevDates&&devRange?`<br>Development: ${formatDate(devRange.start)} — ${formatDate(devRange.end)}`:''}</small><p>${escapeHtml(record.comment)||'No description provided.'}</p>${warnings.length?`<ul>${warningList(record)}</ul>`:''}`;
   tooltip.hidden=false;
   const rect=element.getBoundingClientRect();
   tooltip.style.left=`${Math.max(8,Math.min(rect.left,window.innerWidth-tooltip.offsetWidth-8))}px`;
@@ -339,6 +357,7 @@ function render() {
   document.querySelector('#resultCount').textContent=state.loadPhase==='loading'||state.loadPhase==='error'?'':`${records.length} features`;
   const shell=document.querySelector('#calendarShell');
   shell.innerHTML=loadingMessage()||(records.length?renderSchedule(records):'<div class="empty-state">No features in this date range. Try choosing a different date range.</div>');
+  fitBarStatusIcons(shell);
   shell.querySelector('#retryLoad')?.addEventListener('click',loadData);
   renderAlerts(records);
   bindFeatureInteractions(shell);
@@ -353,6 +372,6 @@ function openDetail(id) {
     const range=kind==='dev'?developmentRange(record):record.prod, status=scheduleStatus(record,kind);
     return `<div class="detail-box"><span>${phaseName(kind)}</span><strong>${range?`${formatDate(range.start)} — ${formatDate(range.end)}`:kind==='dev'?'No Dev Date':'No Prod Date'}</strong><div class="date-status status-${status}">${statusIcon(status)} ${phaseStatusLabel(record,kind)}</div>${kind==='dev'&&!record.dev&&range?`<small class="estimate-note">! Estimated: 14 days, starting 30 days before ${record.prod?'production starts':'the planned month (no production date)'}</small>`:''}</div>`;
   };
-  document.querySelector('#dialogContent').innerHTML=`<div class="dialog-body"><p class="eyebrow">${escapeHtml(record.month)} · ${escapeHtml(record.track||'No track')}</p><h2>${escapeHtml(record.feature)}</h2><div class="team">${escapeHtml(record.event||'No event specified')} · ${escapeHtml(record.team)}</div><div class="detail-grid">${box('dev')}${box('prod')}</div>${warnings.length?`<ul class="detail-warnings">${warnings.map(warning=>`<li>! ${escapeHtml(warning)}</li>`).join('')}</ul>`:''}<div class="comment">${escapeHtml(record.comment)||'No description provided.'}</div>${conflicts.length?`<div class="detail-conflicts"><strong>Overlapping team assignments</strong>${conflicts.map(conflict=>{const other=conflict.a.id===record.id?conflict.b:conflict.a;return `<p>${escapeHtml(other.feature)} (${escapeHtml(other.month)})<small>${escapeHtml(conflictDescription(conflict))}</small></p>`;}).join('')}</div>`:''}<a class="sheet-cell-link" href="https://docs.google.com/spreadsheets/d/${CONFIG.spreadsheetId}/edit#gid=${CONFIG.gid}&amp;range=${record.featureColumn}${record.sheetRow}" target="_blank" rel="noopener noreferrer">Open feature in Google Sheets ↗</a></div>`;
+  document.querySelector('#dialogContent').innerHTML=`<div class="dialog-body"><p class="eyebrow">${escapeHtml(record.month)} · ${escapeHtml(record.track||'No track')}</p><h2>${escapeHtml(record.feature)}</h2><div class="team">${escapeHtml(record.event||'No event specified')} · ${escapeHtml(record.team)}</div><div class="detail-grid">${box('dev')}${box('prod')}</div>${warnings.length?`<ul class="detail-warnings">${warningList(record)}</ul>`:''}<div class="comment">${escapeHtml(record.comment)||'No description provided.'}</div>${conflicts.length?`<div class="detail-conflicts"><strong>Overlapping team assignments</strong>${conflicts.map(conflict=>{const other=conflict.a.id===record.id?conflict.b:conflict.a;return `<p>${escapeHtml(other.feature)} (${escapeHtml(other.month)})<small>${escapeHtml(conflictDescription(conflict))}</small></p>`;}).join('')}</div>`:''}<a class="sheet-cell-link" href="https://docs.google.com/spreadsheets/d/${CONFIG.spreadsheetId}/edit#gid=${CONFIG.gid}&amp;range=${record.featureColumn}${record.sheetRow}" target="_blank" rel="noopener noreferrer">Open feature in Google Sheets ↗</a></div>`;
   document.querySelector('#detailDialog').showModal();
 }

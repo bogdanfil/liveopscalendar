@@ -236,16 +236,18 @@ function findTeamConflicts(records) {
   return conflicts;
 }
 function recordConflicts(record) { return state.conflicts.filter(conflict=>(conflict.a.id===record.id||conflict.b.id===record.id)&&overlaps(conflict)); }
-function recordWarnings(record) {
+function recordAlerts(record) {
   const warnings=[];
   if (!record.prod) warnings.push(record.prodText&&record.prodText!=='-'?'Production dates could not be read':'No Prod Date');
   if (!record.dev) warnings.push(record.estimatedDev?'Dev dates estimated — not entered in sheet':record.devText&&record.devText!=='-'?'Development dates could not be read':'No Dev Date');
   if (activeToday(developmentRange(record))&&!record.devSourceStatus) warnings.push('Development is active but has no status color in the sheet');
+  const alerts=warnings.map(text=>({kind:'planning',text}));
   const conflicts=recordConflicts(record);
   const others=new Set(conflicts.map(conflict=>conflict.a.id===record.id?conflict.b.id:conflict.a.id));
-  if (others.size) warnings.push(`${record.team} has overlapping development on ${others.size} other feature${others.size===1?'':'s'}`);
-  return warnings;
+  if (others.size) alerts.push({kind:'conflict',text:`${record.team} has overlapping development on ${others.size} other feature${others.size===1?'':'s'}`});
+  return alerts;
 }
+function recordWarnings(record) { return recordAlerts(record).map(alert=>alert.text); }
 function isInWindow(record) {
   const month=plannedMonth(record);
   const monthEnd=month&&new Date(month.getFullYear(),month.getMonth()+1,1);
@@ -274,10 +276,28 @@ function missingDateLabel(record) {
   return !record.dev&&!record.prod?'No Prod & Dev Dates':!record.prod?'No Prod Date':!record.dev?'No Dev Date':'';
 }
 
+function conflictIcon() {
+  return '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21v-7L5 7V3m7 11 7-7V3M2 6l3-3 3 3m8 0 3-3 3 3"/></svg>';
+}
+
+function lateIcon() {
+  return '<svg class="overdue-clock" viewBox="0 0 24 24" width="20" height="20" fill="none" aria-hidden="true"><circle cx="9.5" cy="14" r="7.5" fill="white" stroke="currentColor" stroke-width="2"/><path d="M9.5 9.5V14l3 2" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/><circle cx="17" cy="7" r="6.5" fill="currentColor" stroke="white" stroke-width="1"/><path d="M17 3.2v4.1" stroke="white" stroke-width="2" stroke-linecap="round"/><circle cx="17" cy="10.2" r="1.1" fill="white"/></svg>';
+}
+
+function alertIcon(kind,label='') {
+  return `<span class="${kind==='conflict'?'conflict-mark':'warning'}"${label?` title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"`: ' aria-hidden="true"'}>${kind==='conflict'?conflictIcon():'!'}</span>`;
+}
+
 function planningWarning(record) {
-  const label=recordWarnings(record).join(' · ');
-  if (!label) return '';
-  return `<b class="warning" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">!</b>`;
+  const alerts=recordAlerts(record);
+  return ['planning','conflict'].map(kind=>{
+    const label=alerts.filter(alert=>alert.kind===kind).map(alert=>alert.text).join(' · ');
+    return label?alertIcon(kind,label):'';
+  }).join('');
+}
+
+function warningList(record) {
+  return recordAlerts(record).map(alert=>`<li class="typed-warning">${alertIcon(alert.kind)}<span>${escapeHtml(alert.text)}</span></li>`).join('');
 }
 
 function inputDate(date) {
@@ -397,10 +417,12 @@ function statusLabel(status,kind) {
 }
 
 function statusIcon(status) {
-  return `<span class="status-icon icon-${status}" aria-hidden="true">${({green:'✓',yellow:'⚙',red:'!',scheduled:'◷',missing:'!'})[status]}</span>`;
+  return `<span class="status-icon icon-${status}" aria-hidden="true">${status==='red'?lateIcon():({green:'✓',yellow:'⚙',scheduled:'◷',missing:'!'})[status]}</span>`;
 }
 
 // UI event bindings
+document.querySelector('#lateLegendIcon').innerHTML=lateIcon();
+document.querySelector('#overlapLegendIcon').innerHTML=conflictIcon();
 document.querySelector('#showDevelopment').addEventListener('click',event=>{
   const visible=!state.showDev;
   state.showDev=state.showLate=state.showPlanned=state.showEstimates=visible;
@@ -455,6 +477,7 @@ document.addEventListener('keydown',event=>{
   if (event.key==='Escape'&&!document.querySelector('#dateCalendar').hidden) { event.preventDefault(); closeCalendar(true); }
 });
 window.addEventListener('resize',()=>{closeCalendar();hideTooltip();render();});
+document.fonts.ready.then(()=>fitBarStatusIcons(document.querySelector('#calendarShell')));
 window.addEventListener('scroll',event=>{ if (!(event.target instanceof Node)||!document.querySelector('#dateCalendar').contains(event.target)) closeCalendar(); hideTooltip(); },true);
 document.querySelector(".dialog-close").addEventListener("click",()=>document.querySelector("#detailDialog").close());
 document.querySelector("#detailDialog").addEventListener("click",event=>{ if(event.target===event.currentTarget) event.currentTarget.close(); });

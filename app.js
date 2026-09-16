@@ -9,8 +9,7 @@ const CONFIG = {
   cycleEnd: new Date(cycleYear+1, 7, 1)
 };
 
-const TYPE_COLORS = { Sale:"#d07858", Stickers:"#a86d9e", "Season Pass":"#547baa", LTD:"#c39335", Adventure:"#3f8d81", Expedition:"#7b6fa8" };
-const state = { records: [], cellStatuses:{}, view:"schedule", search:"", team:"", feature:"", sortBy:"team", showDev:true, showProd:true, rangeStart:new Date(now.getFullYear(),now.getMonth(),1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
+const state = { records: [], cellStatuses:{}, conflicts:[], sortBy:"team", showDev:true, showLate:false, showPlanned:false, showEstimates:false, showProd:true, rangeStart:new Date(now.getFullYear(),now.getMonth()-2,1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
 
 function parseCsv(text) {
   const rows=[]; let row=[], cell="", quoted=false;
@@ -49,18 +48,53 @@ function parseRange(value) {
   return { start, end };
 }
 
+function sheetColumns(headers=[]) {
+  const names=headers.map(value=>String(value||'').trim().toLowerCase());
+  const find=(...aliases)=>names.findIndex(name=>aliases.includes(name));
+  return { month:find('month'), event:find('event'), feature:find('feature'), team:find('development team','team'), track:find('track'), prod:find('prod dates','production dates'), dev:find('dev dates','development dates'), comment:find('comment','comments','description') };
+}
+
+function columnLetter(index) {
+  let name='';
+  for (let number=index+1;number>0;number=Math.floor((number-1)/26)) name=String.fromCharCode(65+(number-1)%26)+name;
+  return name;
+}
+
+function mergeDescriptions(rows, csvRows) {
+  const commentColumn=sheetColumns(csvRows[0]).comment;
+  if (commentColumn<0) throw new Error('Description column missing');
+  const header=value=>String(value||'').trim().toLowerCase();
+  const shared=rows[0].map((name,index)=>({index,csvIndex:csvRows[0].findIndex(other=>header(name)===header(other))}));
+  if (shared.some(column=>column.csvIndex<0)) throw new Error('Sheet columns changed between reads');
+  const cell=value=>String(value??'').trim();
+  // Google Visualization omits empty physical rows. Match the nonempty rows
+  // in order, while retaining Apps Script row numbers and color alignment.
+  const source=rows.map((row,index)=>({row,index})).slice(1).filter(({row})=>shared.some(column=>cell(row[column.index])));
+  const values=csvRows.slice(1).filter(row=>shared.some(column=>cell(row[column.csvIndex])));
+  if (source.length!==values.length||source.some(({row},index)=>shared.some(column=>cell(row[column.index])!==cell(values[index][column.csvIndex])))) throw new Error('Sheet changed between reads');
+  const result=rows.map(row=>[...row]);
+  const destination=rows[0].length;
+  result[0][destination]=csvRows[0][commentColumn];
+  source.forEach(({index},position)=>{result[index][destination]=values[position][commentColumn]||'';});
+  return result;
+}
+
 function normalize(rows) {
+  const columns=sheetColumns(rows[0]);
+  if (['month','feature','prod','dev'].some(key=>columns[key]<0)) throw new Error('Required sheet columns are missing');
+  const value=(row,key)=>String(row[columns[key]]||'').trim();
   let month="", event="";
   return rows.slice(1).map((row,index)=> {
     if (!row.some(Boolean)) return null;
-    if (row[0]) { month=row[0].trim(); event=""; }
-    if (row[1]) event=row[1].trim();
-    const feature=(row[2]||"").trim();
+    if (value(row,'month')) { month=value(row,'month'); event=""; }
+    if (value(row,'event')) event=value(row,'event');
+    const feature=value(row,'feature');
     if (!feature) return null;
-    const type=feature.startsWith("Stickers")?"Stickers":feature;
     const sheetRow=index+2;
-    const prodText=(row[4]||"").trim(), devText=(row[5]||"").trim(), statuses=state.cellStatuses;
-    return { id:index, sheetRow, month, event, feature, type, title:feature, team:(row[3]||"Unassigned").trim()||"Unassigned", prodText, devText, comment:(row[6]||"").trim(), prod:parseRange(prodText), dev:parseRange(devText), prodSourceStatus:statuses[`${sheetRow}:E`]||statuses[`${feature}|${prodText}:E`]||"", devSourceStatus:statuses[`${sheetRow}:F`]||statuses[`${feature}|${devText}:F`]||"" };
+    const prodText=value(row,'prod'), devText=value(row,'dev'), statuses=state.cellStatuses;
+    const record={ id:index, sheetRow, featureColumn:columnLetter(columns.feature), month, event, feature, type:feature, track:value(row,'track'), title:feature, team:value(row,'team')||'Unassigned', prodText, devText, comment:value(row,'comment'), prod:parseRange(prodText), dev:parseRange(devText), prodSourceStatus:statuses[`${sheetRow}:${columnLetter(columns.prod)}`]||'', devSourceStatus:statuses[`${sheetRow}:${columnLetter(columns.dev)}`]||'' };
+    record.estimatedDev=record.dev?null:estimateDevelopment(record);
+    return record;
   }).filter(Boolean);
 }
 
@@ -73,30 +107,43 @@ async function loadData() {
     let rows;
     if (CONFIG.dataEndpoint) {
       const payload=await response.json(); rows=payload.rows;
-      state.cellStatuses=statusesFromBackgrounds(payload.backgrounds||[]);
+      state.cellStatuses=statusesFromBackgrounds(payload.backgrounds||[],rows[0]);
+      // Older deployed scripts read only A:G. Recover the shifted description
+      // column from CSV only when all shared cells match the colored snapshot.
+      if (sheetColumns(rows[0]).comment<0) {
+        try {
+          const valuesResponse=await fetch(url,{cache:'no-store'});
+          if (!valuesResponse.ok) throw new Error('Description feed unavailable');
+          const fullRows=parseCsv(await valuesResponse.text());
+          rows=mergeDescriptions(rows,fullRows);
+        } catch (error) { console.warn('Descriptions unavailable; update the Apps Script deployment to read every column.',error); }
+      }
     } else rows=parseCsv(await response.text());
-    if (rows.length<2 || rows[0][0]!=="Month") throw new Error("Unexpected sheet format");
-    state.records=normalize(rows); status.classList.add("live"); status.lastElementChild.textContent=CONFIG.dataEndpoint?"Live values + colors":"Live values · colors unavailable";
+    if (rows.length<2) throw new Error("Unexpected sheet format");
+    state.records=normalize(rows);
+    state.conflicts=findTeamConflicts(state.records);
+    status.classList.add("live"); status.lastElementChild.textContent=CONFIG.dataEndpoint?"Live values + colors":"Live values · colors unavailable";
+    if (sheetColumns(rows[0]).comment<0) status.lastElementChild.textContent+=' · descriptions unavailable';
   } catch (error) {
     state.records=[]; status.classList.add("error"); status.lastElementChild.textContent="Live sheet unavailable";
     console.error("Live Sheet unavailable.",error);
   }
-  populateFilters(); render();
+  render();
 }
 
-function statusesFromBackgrounds(backgrounds) {
+function statusesFromBackgrounds(backgrounds,headers=['Month','Event','Feature','Development Team','Prod Dates','Dev Dates','comment']) {
+  const columns=sheetColumns(headers);
   const statuses={};
-  backgrounds.forEach((row,rowIndex)=>[4,5].forEach(columnIndex=>{
+  backgrounds.forEach((row,rowIndex)=>[columns.prod,columns.dev].filter(index=>index>=0).forEach(columnIndex=>{
     const color=String(row[columnIndex]||"").toLowerCase();
     const status=color==="#d9ead3"?"green":color==="#ffff00"?"yellow":color==="#ff0000"?"red":"";
-    if (status) statuses[`${rowIndex+1}:${columnIndex===4?'E':'F'}`]=status;
+    if (status) statuses[`${rowIndex+1}:${columnLetter(columnIndex)}`]=status;
   }));
   return statuses;
 }
 
 function filtered() {
-  const needle=state.search.toLowerCase();
-  return state.records.filter(r=>isInWindow(r)&&(!state.team||r.team===state.team)&&(!state.feature||r.type===state.feature)&&(!needle||[r.feature,r.event,r.team,r.comment,r.month].join(" ").toLowerCase().includes(needle))).sort(sortRecords);
+  return state.records.filter(isInWindow).sort(sortRecords);
 }
 
 function sortRecords(a,b) {
@@ -123,10 +170,46 @@ function plannedMonth(record) {
 }
 
 function overlaps(range) { return range && range.end>=state.rangeStart && range.start<state.rangeEnd; }
+function developmentRange(record) { return record.dev||record.estimatedDev; }
+function activeToday(range) { return Boolean(range&&range.start<=todayDate&&range.end>=todayDate); }
+function estimateDevelopment(record) {
+  const anchor=record.prod?.start||plannedMonth(record);
+  if (!anchor) return null;
+  const start=new Date(anchor.getFullYear(),anchor.getMonth(),anchor.getDate()-30);
+  return {start,end:new Date(start.getFullYear(),start.getMonth(),start.getDate()+13)};
+}
+function findTeamConflicts(records) {
+  const conflicts=[];
+  const pending=records.filter(record=>record.devSourceStatus!=='green'&&record.prodSourceStatus!=='green');
+  for (let i=0;i<pending.length;i++) {
+    const a=pending[i], team=a.team.trim().toLowerCase();
+    if (!team||team==='unassigned') continue;
+    for (let j=i+1;j<pending.length;j++) {
+      const b=pending[j];
+      if (b.team.trim().toLowerCase()!==team) continue;
+      const aRange=developmentRange(a), bRange=developmentRange(b);
+      if (!aRange||!bRange) continue;
+      const start=new Date(Math.max(aRange.start,bRange.start)), end=new Date(Math.min(aRange.end,bRange.end));
+      if (start<=end) conflicts.push({a,b,phaseA:'dev',phaseB:'dev',start,end,estimated:!a.dev||!b.dev});
+    }
+  }
+  return conflicts;
+}
+function recordConflicts(record) { return state.conflicts.filter(conflict=>(conflict.a.id===record.id||conflict.b.id===record.id)&&overlaps(conflict)); }
+function recordWarnings(record) {
+  const warnings=[];
+  if (!record.prod) warnings.push(record.prodText&&record.prodText!=='-'?'Production dates could not be read':'No Prod Date');
+  if (!record.dev) warnings.push(record.estimatedDev?'Dev dates estimated — not entered in sheet':record.devText&&record.devText!=='-'?'Development dates could not be read':'No Dev Date');
+  if (activeToday(developmentRange(record))&&!record.devSourceStatus) warnings.push('Development is active but has no status color in the sheet');
+  const conflicts=recordConflicts(record);
+  const others=new Set(conflicts.map(conflict=>conflict.a.id===record.id?conflict.b.id:conflict.a.id));
+  if (others.size) warnings.push(`${record.team} has overlapping development on ${others.size} other feature${others.size===1?'':'s'}`);
+  return warnings;
+}
 function isInWindow(record) {
   const month=plannedMonth(record);
   const monthEnd=month&&new Date(month.getFullYear(),month.getMonth()+1,1);
-  return overlaps(record.dev)||overlaps(record.prod)||(month&&month<state.rangeEnd&&monthEnd>state.rangeStart)||(!month&&!record.dev&&!record.prod);
+  return overlaps(developmentRange(record))||overlaps(record.prod)||(month&&month<state.rangeEnd&&monthEnd>state.rangeStart)||(!month&&!record.dev&&!record.prod);
 }
 
 function visibleMonths() {
@@ -152,9 +235,9 @@ function missingDateLabel(record) {
 }
 
 function planningWarning(record) {
-  const label=missingDateLabel(record);
+  const label=recordWarnings(record).join(' · ');
   if (!label) return '';
-  return `<b class="warning" title="${label}" aria-label="${label}">!</b>`;
+  return `<b class="warning" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}">!</b>`;
 }
 
 function inputDate(date) {
@@ -210,169 +293,83 @@ function updateDateRange() {
   const [endYear,endMonth,endDay]=endInput.value.split('-').map(Number);
   state.rangeStart=new Date(startYear,startMonth-1,startDay);
   state.rangeEnd=new Date(endYear,endMonth-1,endDay+1);
+  document.querySelector('#rangePreset').value='custom';
   render();
 }
 
-function populateFilters() {
-  const add=(selector,values)=>values.sort().forEach(value=>document.querySelector(selector).add(new Option(value,value)));
-  add("#teamFilter",[...new Set(state.records.map(r=>r.team))]);
-  add("#featureFilter",[...new Set(state.records.map(r=>r.type))]);
+function presetRange(preset,reference=todayDate) {
+  const day=(offset=0)=>new Date(reference.getFullYear(),reference.getMonth(),reference.getDate()+offset);
+  const last=preset.match(/^last(\d+)$/), next=preset.match(/^next(\d+)$/);
+  if (last) return {start:day(1-Number(last[1])),end:day(1)};
+  if (next) return {start:day(),end:day(Number(next[1]))};
+  if (preset==='today') return {start:day(),end:day(1)};
+  if (preset==='yesterday') return {start:day(-1),end:day()};
+  if (preset==='lastMonth') return {start:new Date(reference.getFullYear(),reference.getMonth()-1,1),end:new Date(reference.getFullYear(),reference.getMonth(),1)};
+  if (preset==='thisMonth') return {start:new Date(reference.getFullYear(),reference.getMonth(),1),end:new Date(reference.getFullYear(),reference.getMonth()+1,1)};
+  if (preset==='next6months') return {start:new Date(reference.getFullYear(),reference.getMonth(),1),end:new Date(reference.getFullYear(),reference.getMonth()+6,1)};
+  const planningMonths=preset.match(/^planning(6|8|10)months$/);
+  if (planningMonths) {
+    const forward=Number(planningMonths[1])-2;
+    return {start:new Date(reference.getFullYear(),reference.getMonth()-2,1),end:new Date(reference.getFullYear(),reference.getMonth()+forward,1)};
+  }
+  if (preset==='cycle') return {start:CONFIG.cycleStart,end:CONFIG.cycleEnd};
+  return null;
+}
+
+function applyDatePreset() {
+  const preset=document.querySelector('#rangePreset').value;
+  document.querySelector('#customDates').hidden=preset!=='custom';
+  const range=presetRange(preset);
+  if (range) { state.rangeStart=range.start; state.rangeEnd=range.end; }
+  document.querySelector('#rangeStart').value=inputDate(state.rangeStart);
+  document.querySelector('#rangeEnd').value=inputDate(new Date(state.rangeEnd.getFullYear(),state.rangeEnd.getMonth(),state.rangeEnd.getDate()-1));
+  document.querySelector('#rangeEnd').setCustomValidity('');
+  closeCalendar();
+  render();
 }
 
 function formatDate(date) { return date?date.toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}):"Not scheduled"; }
 function duration(range) { return range?Math.round((range.end-range.start)/86400000)+1:0; }
 function offset(date) { return Math.max(0,Math.min(100,(date-state.rangeStart)/(state.rangeEnd-state.rangeStart)*100)); }
-function escapeHtml(value) { const node=document.createElement("div"); node.textContent=value||""; return node.innerHTML; }
+function escapeHtml(value) { return String(value??'').replace(/[&<>"']/g,char=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char])); }
 
 function scheduleStatus(record,kind) {
-  const range=record[kind], source=record[`${kind}SourceStatus`];
+  const range=kind==='dev'?developmentRange(record):record.prod, source=record[`${kind}SourceStatus`];
   if (!range) return "missing";
+  if (source==='green') return 'green';
+  if (source==='red') return 'red';
   if (kind==="prod") {
-    const devStatus=record.dev?scheduleStatus(record,"dev"):null;
+    if (source==='yellow') return 'yellow';
+    const devStatus=developmentRange(record)?scheduleStatus(record,"dev"):null;
     if (devStatus==="red") return "red";
     if (devStatus==="green") return "green";
     if (devStatus==="yellow") return "yellow";
     return range.start>todayDate ? "scheduled" : "green";
   }
-  if (source==="green") return "green";
   if (range.end<todayDate) return "red";
-  if (todayDate>=range.start && todayDate<=range.end) return "yellow";
+  if (source==='yellow'||activeToday(range)) return "yellow";
   return "scheduled";
 }
 
 function statusLabel(status,kind) {
-  if (kind==="prod" && status==="green") return "Production";
-  return ({green:"Done",yellow:"Development",red:"Late",scheduled:"Upcoming",missing:"Not scheduled"})[status];
+  return ({green:"Done",yellow:"In progress",red:"Late",scheduled:"Planned",missing:"No dates"})[status];
 }
 
-function renderMetrics(records) {
-  const scheduled=records.filter(r=>r.prod||r.dev).length;
-  const ready=records.filter(r=>r.prod&&r.dev).length;
-  const incomplete=records.filter(r=>!r.prod||!r.dev).length;
-  document.querySelector("#metrics").innerHTML=`<div class="metric"><strong>${records.length}</strong><span>deliverables</span></div><div class="metric"><strong>${scheduled}</strong><span>scheduled</span></div><div class="metric"><strong>${ready}</strong><span>dev + prod</span></div><div class="metric"><strong>${incomplete}</strong><span>needs dates</span></div>`;
+function statusIcon(status) {
+  return `<span class="status-icon icon-${status}" aria-hidden="true">${({green:'✓',yellow:'⚙',red:'!',scheduled:'◷',missing:'!'})[status]}</span>`;
 }
 
-function scheduleGroups(records) {
-  const byFeature=new Map();
-  records.filter(r=>overlaps(r.prod)||!r.prod).forEach(record=>{
-    const feature=canonicalScheduleFeature(record.feature);
-    if (!byFeature.has(feature)) byFeature.set(feature,{feature,records:[]});
-    byFeature.get(feature).records.push(record);
-  });
-  return [...byFeature.values()].map(group=>({
-    ...group,
-    teams:[...new Set(group.records.map(r=>r.team))].sort(),
-    holidays:[...new Set(group.records.map(r=>r.event).filter(Boolean))].sort(),
-    firstProd:new Date(Math.min(...group.records.map(r=>r.prod?.start||plannedMonth(r)||state.rangeStart)))
-  })).sort((a,b)=>{
-    if (state.sortBy==="feature") return a.feature.localeCompare(b.feature);
-    if (state.sortBy==="month") return a.firstProd-b.firstProd||a.feature.localeCompare(b.feature);
-    if (state.sortBy==="holiday") return (a.holidays[0]||"No holiday").localeCompare(b.holidays[0]||"No holiday")||a.feature.localeCompare(b.feature);
-    return a.teams.join(", ").localeCompare(b.teams.join(", "))||a.feature.localeCompare(b.feature);
-  });
-}
-
-function canonicalScheduleFeature(feature) {
-  const normalized=feature.trim().toLowerCase();
-  if (normalized.startsWith("stickers")) return "Stickers";
-  if (normalized.startsWith("ltd")) return "LTD";
-  if (normalized.startsWith("season pass")) return "Season Pass";
-  if (normalized.startsWith("sale")) return "Sale";
-  return feature.trim();
-}
-
-function scheduleBar(record,label,top=16) {
-  const left=offset(record.prod.start), width=Math.max(.5,offset(new Date(record.prod.end.getTime()+86400000))-left), status=scheduleStatus(record,"prod");
-  const detail=missingDateLabel(record)||`${duration(record.prod)}d`;
-  return `<button class="bar prod status-${status}${!record.dev?' needs-planning':''}" data-id="${record.id}" style="left:${left}%;width:${width}%;top:${top}px" title="${escapeHtml(label)} · ${record.prodText} · ${missingDateLabel(record)||statusLabel(status,'prod')}">${escapeHtml(label)} · ${detail} ${planningWarning(record)}</button>`;
-}
-
-function scheduleRow(group,line) {
-  const laneEnds=[];
-  const entries=group.records.map(record=>{
-    const month=plannedMonth(record);
-    const start=record.prod?.start||month||state.rangeStart;
-    const end=record.prod?new Date(record.prod.end.getFullYear(),record.prod.end.getMonth(),record.prod.end.getDate()+1):month?new Date(month.getFullYear(),month.getMonth()+1,1):state.rangeEnd;
-    const visible=end>state.rangeStart&&start<state.rangeEnd;
-    const left=visible?offset(start):0, width=visible?Math.max(.5,offset(end)-left):100;
-    return {record,left,width};
-  }).sort((a,b)=>a.left-b.left);
-  const bars=entries.map(({record,left,width})=>{
-    let lane=laneEnds.findIndex(end=>end<=left);
-    if (lane<0) lane=laneEnds.length;
-    laneEnds[lane]=left+width;
-    const top=16+lane*32;
-    if (record.prod) return scheduleBar(record,record.feature,top);
-    const description=missingDateLabel(record);
-    const devDone=scheduleStatus(record,'dev')==='green';
-    return `<button class="bar unplanned needs-planning${devDone?' status-green':''}" data-id="${record.id}" style="left:${left}%;width:${width}%;top:${top}px" title="${escapeHtml(record.feature)} · ${escapeHtml(record.month)} · ${devDone?'Dev done · ':''}${description}" aria-label="${escapeHtml(record.feature)} · ${escapeHtml(record.month)} · ${devDone?'Dev done · ':''}${description}">${escapeHtml(record.feature)} · ${description} ${planningWarning(record)}</button>`;
-  }).join('');
-  const missing=group.records.find(record=>!record.dev||!record.prod);
-  const scheduled=group.records.filter(record=>record.prod).length;
-  const undated=group.records.length-scheduled;
-  const summary=[scheduled?`${scheduled} production window${scheduled===1?'':'s'}`:'',undated?`${undated} without production dates`:''].filter(Boolean).join(' · ');
-  return `<div class="timeline-row schedule-row" style="min-height:${Math.max(56,24+laneEnds.length*32)}px"><div class="event-label" data-id="${group.records[0].id}" style="--type-color:${TYPE_COLORS[group.records[0].type]||'#82909a'}"><i class="type-rail"></i><span><strong>${escapeHtml(group.feature)}</strong><small title="${summary}">${summary}</small><small>${escapeHtml(group.teams.join(', '))}</small></span>${missing?`<button class="feature-warning" data-id="${missing.id}" title="${missingDateLabel(missing)} — open feature details" aria-label="${escapeHtml(group.feature)}: ${missingDateLabel(missing)}">!</button>`:''}</div><div class="track">${line}${bars}</div></div>`;
-}
-
-function renderSchedule(records) {
-  const months=visibleMonths(), today=new Date(), todayVisible=today>=state.rangeStart&&today<state.rangeEnd;
-  const line=monthLines()+(todayVisible?`<i class="today-line" style="left:${offset(today)}%"></i>`:"");
-  const groups=scheduleGroups(records);
-  if (!groups.length) return '<div class="empty-state">No features in this period.</div>';
-  return `<div class="timeline" style="${timelineStyle(months)}"><div class="timeline-header"><div>Production feature</div>${months.map(m=>`<div>${m.toLocaleDateString('en-US',{month:'short'})}<br>${m.getFullYear()}</div>`).join("")}</div>${groups.map(group=>scheduleRow(group,line)).join('')}</div>`;
-}
-
-function timelineBar(record,range,kind) {
-  if (!overlaps(range)) return "";
-  const left=offset(range.start), width=Math.max(.5,offset(new Date(range.end.getTime()+86400000))-left);
-  const status=scheduleStatus(record,kind);
-  return `<button class="bar ${kind} status-${status}" data-id="${record.id}" style="left:${left}%;width:${width}%" title="${statusLabel(status,kind)} · ${kind.toUpperCase()}: ${escapeHtml(kind==='dev'?record.devText:record.prodText)}">${kind==='dev'?'DEV':'PROD'} · ${duration(range)}d</button>`;
-}
-
-function dateCell(record,kind) {
-  const range=record[kind], status=scheduleStatus(record,kind);
-  return range?`${escapeHtml(record[`${kind}Text`])}<br><span class="date-status status-${status}">${statusLabel(status,kind)}</span>`:`<span class="status-missing">${kind==="prod"?"No Prod Date":"No Dev Date"}</span>`;
-}
-
-function renderTimeline(records) {
-  const today=new Date(), todayVisible=today>=state.rangeStart&&today<state.rangeEnd;
-  const line=monthLines()+(todayVisible?`<i class="today-line" style="left:${offset(today)}%"></i>`:"");
-  const months=visibleMonths();
-  const row=r=>`<div class="timeline-row"><div class="event-label" data-id="${r.id}" style="--type-color:${TYPE_COLORS[r.type]||'#82909a'}"><i class="type-rail"></i><span><strong>${escapeHtml(r.feature)}</strong><small>${escapeHtml(r.month)} · ${escapeHtml(r.event||'No theme')}</small><b class="event-team">${escapeHtml(r.team)}</b></span>${planningWarning(r)}</div><div class="track">${line}${state.showDev?timelineBar(r,r.dev,"dev"):''}${state.showProd?timelineBar(r,r.prod,"prod"):''}</div></div>`;
-  return `<div class="timeline" style="${timelineStyle(months)}"><div class="timeline-header"><div>Feature</div>${months.map(m=>`<div>${m.toLocaleDateString('en-US',{month:'short'})}<br>${m.getFullYear()}</div>`).join("")}</div>${grouped(records).map(group=>`<div class="timeline-group"><strong>${escapeHtml(group.name)} · ${group.records.length}</strong><span></span></div>${group.records.map(row).join("")}`).join("")}</div>`;
-}
-
-function renderList(records) {
-  const columns=3+Number(state.showDev)+Number(state.showProd);
-  const body=grouped(records).map(group=>`<tr class="month-group"><td colspan="${columns}">${escapeHtml(group.name)} · ${group.records.length}</td></tr>${group.records.map(r=>`<tr data-id="${r.id}"><td>${planningWarning(r)} <strong>${escapeHtml(r.feature)}</strong><br><small>${escapeHtml(r.month)} · ${escapeHtml(r.team)}</small></td><td>${escapeHtml(r.event)||'—'}</td>${state.showDev?`<td>${dateCell(r,'dev')}</td>`:''}${state.showProd?`<td>${dateCell(r,'prod')}</td>`:''}<td>${r.dev&&r.prod?'<span class="status-check">✓ Complete</span>':`<span class="status-missing">! ${missingDateLabel(r)}</span>`}</td></tr>`).join("")}`).join("");
-  return `<table class="list-view"><thead><tr><th>Feature</th><th>Event</th>${state.showDev?'<th>Development</th>':''}${state.showProd?'<th>Production</th>':''}<th>Coverage</th></tr></thead><tbody>${body}</tbody></table>`;
-}
-
-function render() {
-  const records=filtered(); renderMetrics(records);
-  document.querySelector("#rangeLabel").textContent=`${formatDate(state.rangeStart)} — ${formatDate(new Date(state.rangeEnd.getFullYear(),state.rangeEnd.getMonth(),state.rangeEnd.getDate()-1))}`;
-  const shell=document.querySelector("#calendarShell");
-  shell.innerHTML=records.length?(state.view==="schedule"?renderSchedule(records):state.view==="timeline"?renderTimeline(records):renderList(records)):'<div class="empty-state">No events match these filters.</div>';
-  shell.querySelectorAll("[data-id]").forEach(el=>el.addEventListener("click",event=>{ event.stopPropagation(); openDetail(Number(el.dataset.id)); }));
-}
-
-function openDetail(id) {
-  const r=state.records.find(item=>item.id===id); if (!r) return;
-  document.querySelector("#dialogContent").innerHTML=`<div class="dialog-body"><p class="eyebrow">${escapeHtml(r.month)} · ${escapeHtml(r.type)}</p><h2>${planningWarning(r)} ${escapeHtml(r.feature)}</h2><div class="team">${escapeHtml(r.event||"No event specified")} · ${escapeHtml(r.team)}</div><div class="detail-grid"><div class="detail-box"><span>Development</span><strong>${r.dev?`${formatDate(r.dev.start)} — ${formatDate(r.dev.end)}`:"No Dev Date"}</strong></div><div class="detail-box"><span>Production</span><strong>${r.prod?`${formatDate(r.prod.start)} — ${formatDate(r.prod.end)}`:"No Prod Date"}</strong></div></div><div class="comment">${escapeHtml(r.comment)||"No description provided."}</div><a class="sheet-cell-link" href="https://docs.google.com/spreadsheets/d/${CONFIG.spreadsheetId}/edit#gid=${CONFIG.gid}&amp;range=C${r.sheetRow}" target="_blank" rel="noopener noreferrer">Open feature in Google Sheets ↗</a></div>`;
-  document.querySelector("#detailDialog").showModal();
-}
-
-document.querySelectorAll("[data-view]").forEach(button=>button.addEventListener("click",()=>{ document.querySelectorAll("[data-view]").forEach(b=>b.classList.toggle("active",b===button)); state.view=button.dataset.view; render(); }));
-document.querySelector("#searchInput").addEventListener("input",event=>{ state.search=event.target.value; render(); });
-document.querySelector("#teamFilter").addEventListener("change",event=>{ state.team=event.target.value; render(); });
-document.querySelector("#featureFilter").addEventListener("change",event=>{ state.feature=event.target.value; render(); });
+// UI event bindings
 document.querySelector("#showDev").addEventListener("change",event=>{ state.showDev=event.target.checked; render(); });
+document.querySelector('#showPlanned').addEventListener('change',event=>{ state.showPlanned=event.target.checked; render(); });
+document.querySelector('#showLate').addEventListener('change',event=>{ state.showLate=event.target.checked; render(); });
+document.querySelector('#showEstimates').addEventListener('change',event=>{ state.showEstimates=event.target.checked; render(); });
 document.querySelector("#showProd").addEventListener("change",event=>{ state.showProd=event.target.checked; render(); });
-document.querySelector("#sortFilter").addEventListener("change",event=>{ state.sortBy=event.target.value; render(); });
 document.querySelector('#rangeStart').value=inputDate(state.rangeStart);
 document.querySelector('#rangeEnd').value=inputDate(new Date(state.rangeEnd.getFullYear(),state.rangeEnd.getMonth(),0));
 document.querySelector('#rangeStart').addEventListener('change',updateDateRange);
 document.querySelector('#rangeEnd').addEventListener('change',updateDateRange);
+document.querySelector('#rangePreset').addEventListener('change',applyDatePreset);
 document.querySelectorAll('[data-date-picker]').forEach(button=>{
   const input=document.getElementById(button.dataset.datePicker);
   input.classList.add('has-picker-button');
@@ -410,10 +407,11 @@ document.addEventListener('click',event=>{
   if (!event.target.closest('#dateCalendar, .date-input')) closeCalendar();
 });
 document.addEventListener('keydown',event=>{
+  if (event.key==='Escape') hideTooltip();
   if (event.key==='Escape'&&!document.querySelector('#dateCalendar').hidden) { event.preventDefault(); closeCalendar(true); }
 });
-window.addEventListener('resize',()=>closeCalendar());
-window.addEventListener('scroll',event=>{ if (!document.querySelector('#dateCalendar').contains(event.target)) closeCalendar(); },true);
+window.addEventListener('resize',()=>{closeCalendar();hideTooltip();});
+window.addEventListener('scroll',event=>{ if (!(event.target instanceof Node)||!document.querySelector('#dateCalendar').contains(event.target)) closeCalendar(); hideTooltip(); },true);
 document.querySelector(".dialog-close").addEventListener("click",()=>document.querySelector("#detailDialog").close());
 document.querySelector("#detailDialog").addEventListener("click",event=>{ if(event.target===event.currentTarget) event.currentTarget.close(); });
 

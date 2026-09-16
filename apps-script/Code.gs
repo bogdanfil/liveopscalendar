@@ -4,7 +4,7 @@ const SHEET_NAME = "LiveOps Data";
 function doGet() {
   const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(SHEET_NAME);
   const lastRow = sheet.getLastRow();
-  const range = sheet.getRange(1, 1, lastRow, 7);
+  const range = sheet.getRange(1, 1, lastRow, sheet.getLastColumn());
   return ContentService
     .createTextOutput(JSON.stringify({
       rows: range.getDisplayValues(),

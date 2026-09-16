@@ -6,7 +6,7 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'app.js'), 'utf8');
 const context = vm.createContext({ window: {} });
-vm.runInContext(source.slice(0, source.indexOf('document.querySelectorAll("[data-view]")')), context);
+vm.runInContext(source.slice(0, source.indexOf('// UI event bindings')), context);
 const parseRange = vm.runInContext('parseRange', context);
 const cycleYear = vm.runInContext('cycleYear', context);
 const date = value => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;

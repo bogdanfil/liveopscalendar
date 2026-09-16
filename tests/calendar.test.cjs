@@ -208,6 +208,11 @@ test('presets use inclusive day counts and correct month/year boundaries',()=>{
     assert.equal(iso(planning.start),start);
     assert.equal(iso(planning.end),end);
   }
+  const forward=preset('planning6monthsForward',new Date(2026,0,31));
+  assert.equal(iso(forward.start),'2025-12-01');
+  assert.equal(iso(forward.end),'2026-06-01');
+  assert.equal(iso(run('state.rangeStart')),'2026-08-01');
+  assert.equal(iso(run('state.rangeEnd')),'2027-02-01');
 });
 
 test('bars show status icons, estimate warnings and escaped feature text',()=>{

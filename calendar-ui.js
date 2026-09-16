@@ -68,9 +68,11 @@ function featureBar(record,range,kind,top,overlay=false) {
   const status=kind==='missing'?'missing':scheduleStatus(record,kind);
   const estimated=kind==='dev'&&!record.dev;
   const warnings=recordWarnings(record);
-  const caption=kind==='missing'?`${record.feature} · ${missingDateLabel(record)}`:`${kind==='dev'?'DEV · ':''}${record.feature}${estimated?' · Estimated':''}`;
+  const caption=kind==='missing'?`${record.feature} · ${missingDateLabel(record)}`:`${record.feature}${estimated?' · Estimated':''}`;
   const label=`${record.feature} · ${phaseName(kind)} · ${kind==='missing'?statusLabel(status):phaseStatusLabel(record,kind)}${estimated?' · Estimated dates':''}`;
-  return `<button class="bar ${kind==='missing'?'unplanned':kind} status-${status}${overlay?' dev-overlay':''}${estimated?' estimated':''}${warnings.length?' needs-planning':''}" data-id="${record.id}" data-kind="${kind}" style="left:${left}%;width:${width}%;top:${top}px" aria-label="${escapeHtml(label)}">${statusIcon(status)}<span class="bar-label">${escapeHtml(caption)}</span>${warnings.length?planningWarning(record):''}</button>`;
+  const warning=warnings.length?planningWarning(record):'';
+  const icons=`<span class="bar-adornment bar-status">${statusIcon(status)}</span>`;
+  return `<button class="bar ${kind==='missing'?'unplanned':kind} status-${status}${overlay?' dev-overlay':''}${estimated?' estimated':''}${warnings.length?' needs-planning':''}" data-id="${record.id}" data-kind="${kind}" style="left:${left}%;width:${width}%;top:${top}px" aria-label="${escapeHtml(label)}">${icons}<span class="bar-label">${escapeHtml(caption)}</span>${warning?`<span class="bar-adornment bar-alert">${warning}</span>`:''}</button>`;
 }
 
 const SCHEDULE_LANE_STEP=55;
@@ -200,16 +202,18 @@ function developmentConnectors(entries,height,connections=scheduleConnections(en
   return `<svg class="phase-connectors" style="height:${height}px" viewBox="0 0 1000 ${height}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${paths}</svg>`;
 }
 
-function layoutScheduleEntries(source) {
+function layoutScheduleEntries(source,trackWidth=1000) {
   const entries=source.map(entry=>({...entry,...barGeometry(entry.range)})).sort((a,b)=>a.left-b.left||a.record.id-b.record.id);
   let laneOffset=0;
   const positioned=[];
   for (const development of [false,true]) {
     const laneEnds=[];
     for (const entry of entries.filter(entry=>(entry.kind==='dev')===development)) {
-      let lane=laneEnds.findIndex(end=>end<=entry.left);
+      // Icons occupy real space on both sides without changing the date width.
+      const iconSpace=27/trackWidth*100;
+      let lane=laneEnds.findIndex(end=>end<=entry.left-iconSpace);
       if (lane<0) lane=laneEnds.length;
-      laneEnds[lane]=entry.left+entry.width;
+      laneEnds[lane]=entry.left+entry.width+(recordWarnings(entry.record).length?iconSpace:0);
       positioned.push({...entry,top:14+(laneOffset+lane)*SCHEDULE_LANE_STEP});
     }
     laneOffset+=laneEnds.length;
@@ -217,8 +221,8 @@ function layoutScheduleEntries(source) {
   return positioned;
 }
 
-function scheduleRow(group,line) {
-  const entries=layoutScheduleEntries(group.entries);
+function scheduleRow(group,line,trackWidth=1000) {
+  const entries=layoutScheduleEntries(group.entries,trackWidth);
   const bars=entries.map(entry=>featureBar(entry.record,entry.range,entry.kind,entry.top,entry.kind==='dev')).join('');
   const connections=scheduleConnections(entries);
   const height=Math.max(62,...entries.map(entry=>entry.top+25+14),...connections.flatMap(connection=>connection.points.map(point=>point.y+12)));
@@ -238,7 +242,11 @@ function timelineLines() {
 function renderSchedule(records) {
   const months=visibleMonths(), groups=scheduleGroups(records), line=timelineLines();
   if (!groups.length) return '<div class="empty-state">No visible windows. Try another date range or enable a timeline layer.</div>';
-  return `<div class="timeline" style="${timelineStyle(months)}">${timelineHeader(months,'Track')}${groups.map(group=>scheduleRow(group,line)).join('')}</div>`;
+  const shell=document.querySelector('#calendarShell');
+  const labelWidth=parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--label'))||248;
+  const timelineWidth=Math.max(shell.clientWidth,980,248+months.length*92);
+  const trackWidth=Math.max(1,timelineWidth-labelWidth-56);
+  return `<div class="timeline schedule-layout" style="${timelineStyle(months)}">${timelineHeader(months,'Track')}${groups.map(group=>scheduleRow(group,line,trackWidth)).join('')}</div>`;
 }
 
 function renderTimeline(records) {

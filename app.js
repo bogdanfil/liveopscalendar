@@ -9,7 +9,7 @@ const CONFIG = {
   cycleEnd: new Date(cycleYear+1, 7, 1)
 };
 
-const state = { records: [], cellStatuses:{}, conflicts:[], sortBy:"team", showDev:false, showLate:false, showPlanned:false, showEstimates:false, showProd:true, rangeStart:new Date(now.getFullYear(),now.getMonth()-2,1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
+const state = { records: [], cellStatuses:{}, conflicts:[], sortBy:"team", showDev:false, showLate:false, showPlanned:false, showEstimates:false, showProd:true, rangeStart:new Date(now.getFullYear(),now.getMonth()-1,1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+5,1) };
 
 function parseCsv(text) {
   const rows=[]; let row=[], cell="", quoted=false;
@@ -347,6 +347,7 @@ function presetRange(preset,reference=todayDate) {
   if (preset==='lastMonth') return {start:new Date(reference.getFullYear(),reference.getMonth()-1,1),end:new Date(reference.getFullYear(),reference.getMonth(),1)};
   if (preset==='thisMonth') return {start:new Date(reference.getFullYear(),reference.getMonth(),1),end:new Date(reference.getFullYear(),reference.getMonth()+1,1)};
   if (preset==='next6months') return {start:new Date(reference.getFullYear(),reference.getMonth(),1),end:new Date(reference.getFullYear(),reference.getMonth()+6,1)};
+  if (preset==='planning6monthsForward') return {start:new Date(reference.getFullYear(),reference.getMonth()-1,1),end:new Date(reference.getFullYear(),reference.getMonth()+5,1)};
   const planningMonths=preset.match(/^planning(6|8|10)months$/);
   if (planningMonths) {
     const forward=Number(planningMonths[1])-2;
@@ -453,7 +454,7 @@ document.addEventListener('keydown',event=>{
   if (event.key==='Escape') hideTooltip();
   if (event.key==='Escape'&&!document.querySelector('#dateCalendar').hidden) { event.preventDefault(); closeCalendar(true); }
 });
-window.addEventListener('resize',()=>{closeCalendar();hideTooltip();});
+window.addEventListener('resize',()=>{closeCalendar();hideTooltip();render();});
 window.addEventListener('scroll',event=>{ if (!(event.target instanceof Node)||!document.querySelector('#dateCalendar').contains(event.target)) closeCalendar(); hideTooltip(); },true);
 document.querySelector(".dialog-close").addEventListener("click",()=>document.querySelector("#detailDialog").close());
 document.querySelector("#detailDialog").addEventListener("click",event=>{ if(event.target===event.currentTarget) event.currentTarget.close(); });

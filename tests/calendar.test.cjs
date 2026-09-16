@@ -108,8 +108,8 @@ test('estimated development starts 30 days before production and lasts 14 inclus
 
 test('current, planned and estimated development toggles operate independently and exclude done work',()=>{
   const {run}=setup();
-  assert.deepEqual(Array.from(run('[state.showDev,state.showLate,state.showPlanned,state.showEstimates,state.showProd]')),[true,false,false,false,true]);
-  run('state.showPlanned=true;state.showEstimates=true');
+  assert.deepEqual(Array.from(run('[state.showDev,state.showLate,state.showPlanned,state.showEstimates,state.showProd]')),[false,false,false,false,true]);
+  run('state.showDev=true;state.showPlanned=true;state.showEstimates=true');
   const inspect=run(`rows=>normalize(rows).map(record=>({entries:scheduleEntries(record),warnings:recordWarnings(record)}))`);
   const rows=[headers,
     ['October','','Current','Team','Track','1.10 - 20.10','1.09 - 30.09'],
@@ -232,7 +232,7 @@ test('production status respects explicit yellow sheet color',()=>{
 
 test('development connectors join only matching visible boxes and follow layer toggles',()=>{
   const {run}=setup();
-  run('state.showPlanned=true;state.showEstimates=true');
+  run('state.showDev=true;state.showPlanned=true;state.showEstimates=true');
   run(`state.records=normalize(${JSON.stringify([headers,
     ['October','','Current','Team','Together','1.10 - 20.10','1.09 - 30.09'],
     ['October','','Overlapping phases','Other','Together','10.10 - 20.10','1.10 - 15.10'],
@@ -249,6 +249,26 @@ test('development connectors join only matching visible boxes and follow layer t
   assert.doesNotMatch(render(),/class="phase-connectors"/);
   run('state.showProd=true;state.showDev=false;state.showPlanned=false;state.showEstimates=false');
   assert.doesNotMatch(render(),/class="phase-connectors"/);
+});
+
+test('development occupies separate lanes below all production and placeholder bars',()=>{
+  const {run}=setup();
+  const entries=run(`(()=>{
+    state.showDev=state.showLate=state.showPlanned=state.showEstimates=true;
+    const records=normalize(${JSON.stringify([headers,
+      ['October','','First','Team','Track','1.10.26 - 20.10.26','1.09.26 - 30.09.26'],
+      ['October','','Overlapping','Team','Track','10.10.26 - 25.10.26','10.09.26 - 30.09.26'],
+      ['December','','Later','Team','Track','1.12.26 - 20.12.26','1.11.26 - 14.11.26'],
+      ['January','','Missing','Team','Track','','']])});
+    return layoutScheduleEntries(records.flatMap(scheduleEntries));
+  })()`);
+  const prod=entries.filter(entry=>entry.kind!=='dev'),dev=entries.filter(entry=>entry.kind==='dev');
+  assert.ok(dev.length>0&&prod.length>0);
+  assert.ok(Math.min(...dev.map(entry=>entry.top))>Math.max(...prod.map(entry=>entry.top)));
+  assert.notEqual(dev[0].top,dev[1].top,'Overlapping development stays readable on separate lanes');
+  const single=run('layoutScheduleEntries')([prod[0],dev[0]]);
+  assert.equal(single[0].top,14);
+  assert.equal(single[1].top,14+run('SCHEDULE_LANE_STEP'));
 });
 
 test('connector anchors do not overshoot and double back into hooked joins',()=>{

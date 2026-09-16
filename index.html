@@ -23,10 +23,10 @@
 
 
     <div class="legend" aria-label="Schedule visibility">
-      <label class="schedule-toggle dev-toggle"><input id="showDev" type="checkbox" checked><span class="checkmark">✓</span><i class="legend-line dev"></i> <span id="devToggleLabel">Current dev</span></label>
-      <label class="schedule-toggle late-toggle"><input id="showLate" type="checkbox"><span class="checkmark">✓</span> Late dev</label>
-      <label class="schedule-toggle planned-toggle"><input id="showPlanned" type="checkbox"><span class="checkmark">✓</span> Planned dev</label>
-      <label class="schedule-toggle estimate-toggle"><input id="showEstimates" type="checkbox"><span class="checkmark">✓</span> Estimated dev</label>
+      <button id="showDevelopment" class="development-toggle" type="button" aria-pressed="false" title="Show all development: current, late, planned, and estimated">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/><path class="eye-slash" d="m3 3 18 18"/></svg>
+        Development
+      </button>
       <label class="schedule-toggle prod-toggle"><input id="showProd" type="checkbox" checked><span class="checkmark">✓</span><i class="legend-line prod"></i> Production</label>
       <select id="rangePreset" aria-label="Date range preset">
         <optgroup label="Recent"><option value="today">Today</option><option value="yesterday">Yesterday</option><option value="last7">Last 7 days</option><option value="last30">Last 30 days</option><option value="last60">Last 60 days</option><option value="last90">Last 90 days</option></optgroup>

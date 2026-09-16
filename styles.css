@@ -61,10 +61,12 @@ select,.date-control input { height:36px; padding:0 12px; border:1px solid var(-
 .schedule-toggle input { position:absolute; opacity:0; pointer-events:none; }
 .checkmark { display:grid!important; place-items:center; width:18px; height:18px; border:1px solid #aab5bc; border-radius:3px; color:#fff; background:#fff; font-size:12px; }
 .schedule-toggle input:checked + .checkmark { border-color:var(--toggle-color); background:var(--toggle-color); }
-.dev-toggle { --toggle-color:var(--dev); } .prod-toggle { --toggle-color:var(--prod); }
-.estimate-toggle { --toggle-color:#7b6fa8; }
-.planned-toggle { --toggle-color:#8797a1; }
-.late-toggle { --toggle-color:#ce5e58; }
+.prod-toggle { --toggle-color:var(--prod); }
+.development-toggle { display:flex; align-items:center; gap:7px; padding:4px 7px; border:1px solid transparent; border-radius:4px; background:transparent; color:var(--muted); font-weight:600; }
+.development-toggle:hover { background:#edf1f3; }
+.development-toggle[aria-pressed="true"] { color:#725409; background:var(--dev-soft); border-color:#d6a52766; }
+.development-toggle[aria-pressed="true"] .eye-slash { display:none; }
+.development-toggle:focus-visible { outline:2px solid var(--accent); outline-offset:2px; }
 .schedule-toggle:focus-within .checkmark { outline:2px solid var(--accent); outline-offset:2px; }
 .schedule-toggle:has(input:not(:checked)) { color:#909ba3; }
 .schedule-toggle:has(input:not(:checked)) .legend-line { opacity:.3; }

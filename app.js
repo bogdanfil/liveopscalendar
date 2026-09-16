@@ -9,7 +9,7 @@ const CONFIG = {
   cycleEnd: new Date(cycleYear+1, 7, 1)
 };
 
-const state = { records: [], cellStatuses:{}, conflicts:[], sortBy:"team", showDev:true, showLate:false, showPlanned:false, showEstimates:false, showProd:true, rangeStart:new Date(now.getFullYear(),now.getMonth()-2,1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
+const state = { records: [], cellStatuses:{}, conflicts:[], sortBy:"team", showDev:false, showLate:false, showPlanned:false, showEstimates:false, showProd:true, rangeStart:new Date(now.getFullYear(),now.getMonth()-2,1), rangeEnd:new Date(now.getFullYear(),now.getMonth()+6,1) };
 
 function parseCsv(text) {
   const rows=[]; let row=[], cell="", quoted=false;
@@ -400,10 +400,13 @@ function statusIcon(status) {
 }
 
 // UI event bindings
-document.querySelector("#showDev").addEventListener("change",event=>{ state.showDev=event.target.checked; render(); });
-document.querySelector('#showPlanned').addEventListener('change',event=>{ state.showPlanned=event.target.checked; render(); });
-document.querySelector('#showLate').addEventListener('change',event=>{ state.showLate=event.target.checked; render(); });
-document.querySelector('#showEstimates').addEventListener('change',event=>{ state.showEstimates=event.target.checked; render(); });
+document.querySelector('#showDevelopment').addEventListener('click',event=>{
+  const visible=!state.showDev;
+  state.showDev=state.showLate=state.showPlanned=state.showEstimates=visible;
+  event.currentTarget.setAttribute('aria-pressed',String(visible));
+  event.currentTarget.title=`${visible?'Hide':'Show'} all development: current, late, planned, and estimated`;
+  render();
+});
 document.querySelector("#showProd").addEventListener("change",event=>{ state.showProd=event.target.checked; render(); });
 document.querySelector('#rangeStart').value=inputDate(state.rangeStart);
 document.querySelector('#rangeEnd').value=inputDate(new Date(state.rangeEnd.getFullYear(),state.rangeEnd.getMonth(),0));

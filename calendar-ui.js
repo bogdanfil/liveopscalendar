@@ -200,14 +200,25 @@ function developmentConnectors(entries,height,connections=scheduleConnections(en
   return `<svg class="phase-connectors" style="height:${height}px" viewBox="0 0 1000 ${height}" preserveAspectRatio="none" aria-hidden="true" focusable="false">${paths}</svg>`;
 }
 
+function layoutScheduleEntries(source) {
+  const entries=source.map(entry=>({...entry,...barGeometry(entry.range)})).sort((a,b)=>a.left-b.left||a.record.id-b.record.id);
+  let laneOffset=0;
+  const positioned=[];
+  for (const development of [false,true]) {
+    const laneEnds=[];
+    for (const entry of entries.filter(entry=>(entry.kind==='dev')===development)) {
+      let lane=laneEnds.findIndex(end=>end<=entry.left);
+      if (lane<0) lane=laneEnds.length;
+      laneEnds[lane]=entry.left+entry.width;
+      positioned.push({...entry,top:14+(laneOffset+lane)*SCHEDULE_LANE_STEP});
+    }
+    laneOffset+=laneEnds.length;
+  }
+  return positioned;
+}
+
 function scheduleRow(group,line) {
-  const laneEnds=[];
-  const entries=group.entries.map(entry=>({...entry,...barGeometry(entry.range)})).sort((a,b)=>a.left-b.left||a.kind.localeCompare(b.kind)).map(entry=>{
-    let lane=laneEnds.findIndex(end=>end<=entry.left);
-    if (lane<0) lane=laneEnds.length;
-    laneEnds[lane]=entry.left+entry.width;
-    return {...entry,top:14+lane*SCHEDULE_LANE_STEP};
-  });
+  const entries=layoutScheduleEntries(group.entries);
   const bars=entries.map(entry=>featureBar(entry.record,entry.range,entry.kind,entry.top,entry.kind==='dev')).join('');
   const connections=scheduleConnections(entries);
   const height=Math.max(62,...entries.map(entry=>entry.top+25+14),...connections.flatMap(connection=>connection.points.map(point=>point.y+12)));

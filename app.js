@@ -98,35 +98,75 @@ function normalize(rows) {
   }).filter(Boolean);
 }
 
+async function fetchSheet(url,format,timeout=10000) {
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),timeout);
+  try {
+    const response=await fetch(url,{cache:'no-store',signal:controller.signal});
+    if (!response.ok) {
+      const error=new Error(`HTTP ${response.status}`);
+      error.status=response.status;
+      throw error;
+    }
+    return await (format==='json'?response.json():response.text());
+  } finally { clearTimeout(timer); }
+}
+
+function sheetErrorMessage(error) {
+  if (error.status===401||error.status===403) return 'Google did not allow access to the schedule. Please ask the calendar owner to check sharing access.';
+  if (error.name==='AbortError') return 'Google is taking too long to respond. Please check your connection and try again in a moment.';
+  if (error instanceof TypeError) return 'We couldn’t connect to Google Sheets. Please check your internet connection and try again.';
+  if (error.status===429||error.status>=500) return 'Google Sheets is temporarily unavailable. Please try again in a moment.';
+  return 'We couldn’t read the schedule from Google Sheets. Please try again. If this keeps happening, contact the calendar owner.';
+}
+
 async function loadData() {
+  if (state.loadPhase==='loading') return;
   const status=document.querySelector("#syncStatus");
   const url=`https://docs.google.com/spreadsheets/d/${CONFIG.spreadsheetId}/gviz/tq?tqx=out:csv&gid=${CONFIG.gid}`;
-  try {
-    const response=await fetch(CONFIG.dataEndpoint||url,{cache:"no-store"});
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    let rows;
-    if (CONFIG.dataEndpoint) {
-      const payload=await response.json(); rows=payload.rows;
-      state.cellStatuses=statusesFromBackgrounds(payload.backgrounds||[],rows[0]);
-      // Older deployed scripts read only A:G. Recover the shifted description
-      // column from CSV only when all shared cells match the colored snapshot.
-      if (sheetColumns(rows[0]).comment<0) {
-        try {
-          const valuesResponse=await fetch(url,{cache:'no-store'});
-          if (!valuesResponse.ok) throw new Error('Description feed unavailable');
-          const fullRows=parseCsv(await valuesResponse.text());
-          rows=mergeDescriptions(rows,fullRows);
-        } catch (error) { console.warn('Descriptions unavailable; update the Apps Script deployment to read every column.',error); }
+  state.loadPhase='loading';
+  state.loadError='';
+  status.classList.remove('live','error');
+  for (let attempt=1;attempt<=3;attempt++) {
+    state.loadAttempt=attempt;
+    status.lastElementChild.textContent=attempt===1?'Loading schedule':`Retrying · attempt ${attempt} of 3`;
+    render();
+    try {
+      const payload=await fetchSheet(CONFIG.dataEndpoint||url,CONFIG.dataEndpoint?'json':'text');
+      let rows;
+      state.cellStatuses={};
+      if (CONFIG.dataEndpoint) {
+        rows=payload.rows;
+        if (!Array.isArray(rows)||!Array.isArray(rows[0])) throw new Error('Unexpected sheet format');
+        state.cellStatuses=statusesFromBackgrounds(payload.backgrounds||[],rows[0]);
+        // Older deployed scripts read only A:G. Recover the shifted description
+        // column from CSV only when all shared cells match the colored snapshot.
+        if (sheetColumns(rows[0]).comment<0) {
+          try {
+            const fullRows=parseCsv(await fetchSheet(url,'text',5000));
+            rows=mergeDescriptions(rows,fullRows);
+          } catch (error) { console.warn('Descriptions unavailable; update the Apps Script deployment to read every column.',error); }
+        }
+      } else rows=parseCsv(payload);
+      state.records=normalize(rows);
+      state.conflicts=findTeamConflicts(state.records);
+      state.loadPhase='loaded';
+      status.classList.add("live"); status.lastElementChild.textContent=CONFIG.dataEndpoint?"Live values + colors":"Live values · colors unavailable";
+      if (sheetColumns(rows[0]).comment<0) status.lastElementChild.textContent+=' · descriptions unavailable';
+      render();
+      return;
+    } catch (error) {
+      const retryable=error.name==='AbortError'||error instanceof TypeError||error.status===429||error.status>=500;
+      if (attempt<3&&retryable) {
+        await new Promise(resolve=>setTimeout(resolve,attempt*1000));
+        continue;
       }
-    } else rows=parseCsv(await response.text());
-    if (rows.length<2) throw new Error("Unexpected sheet format");
-    state.records=normalize(rows);
-    state.conflicts=findTeamConflicts(state.records);
-    status.classList.add("live"); status.lastElementChild.textContent=CONFIG.dataEndpoint?"Live values + colors":"Live values · colors unavailable";
-    if (sheetColumns(rows[0]).comment<0) status.lastElementChild.textContent+=' · descriptions unavailable';
-  } catch (error) {
-    state.records=[]; status.classList.add("error"); status.lastElementChild.textContent="Live sheet unavailable";
-    console.error("Live Sheet unavailable.",error);
+      state.records=[]; state.conflicts=[];
+      state.loadPhase='error'; state.loadError=sheetErrorMessage(error);
+      status.classList.add("error"); status.lastElementChild.textContent="Couldn’t load schedule";
+      console.error("Live Sheet unavailable.",error);
+      break;
+    }
   }
   render();
 }

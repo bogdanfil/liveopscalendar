@@ -307,13 +307,20 @@ function bindFeatureInteractions(container) {
   });
 }
 
+function loadingMessage() {
+  if (state.loadPhase==='loading') return `<div class="empty-state load-state" role="status"><div><h2>${state.loadAttempt>1?'Still trying to connect…':'Loading your schedule…'}</h2><p>${state.loadAttempt>1?`Attempt ${state.loadAttempt} of 3. We’ll retry automatically if Google doesn’t respond.`:'Getting the latest dates and statuses from Google Sheets.'}</p></div></div>`;
+  if (state.loadPhase==='error') return `<div class="empty-state load-state" role="alert"><div><h2>We couldn’t load the schedule</h2><p>${escapeHtml(state.loadError)}</p><button type="button" id="retryLoad">Try again</button></div></div>`;
+  return '';
+}
+
 function render() {
   hideTooltip();
   const records=filtered();
   document.querySelector('#rangeLabel').textContent=`${formatDate(state.rangeStart)} — ${formatDate(new Date(state.rangeEnd.getFullYear(),state.rangeEnd.getMonth(),state.rangeEnd.getDate()-1))}`;
-  document.querySelector('#resultCount').textContent=`${records.length} features`;
+  document.querySelector('#resultCount').textContent=state.loadPhase==='loading'||state.loadPhase==='error'?'':`${records.length} features`;
   const shell=document.querySelector('#calendarShell');
-  shell.innerHTML=records.length?renderSchedule(records):'<div class="empty-state">No events match these filters.</div>';
+  shell.innerHTML=loadingMessage()||(records.length?renderSchedule(records):'<div class="empty-state">No features in this date range. Try choosing a different date range.</div>');
+  shell.querySelector('#retryLoad')?.addEventListener('click',loadData);
   renderAlerts(records);
   bindFeatureInteractions(shell);
   bindFeatureInteractions(document.querySelector('#teamAlerts'));

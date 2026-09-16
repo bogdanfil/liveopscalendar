@@ -172,6 +172,11 @@ select,.date-control input { height:36px; padding:0 12px; border:1px solid var(-
 .status-check { color:var(--dev); font-weight:700; } .status-missing { color:var(--warn); }
 .date-status { display:inline-block; margin-top:3px; padding:2px 5px; border-radius:3px; color:#fff; font-size:9px; font-weight:700; text-transform:uppercase; }
 .empty-state { display:grid; place-items:center; min-height:420px; color:var(--muted); }
+.load-state { padding:32px; text-align:center; }
+.load-state > div { max-width:440px; }
+.load-state h2 { margin:0 0 12px; color:var(--ink); font-size:19px; }
+.load-state p { margin:0 0 20px; line-height:1.6; }
+.load-state button { padding:9px 18px; border:0; border-radius:5px; background:#183b52; color:#fff; font-weight:600; }
 dialog { width:min(560px,calc(100% - 30px)); padding:0; border:0; border-radius:7px; box-shadow:0 24px 80px #15243155; }
 dialog::backdrop { background:#15243180; }
 .dialog-close { position:absolute; top:12px; right:12px; width:32px; height:32px; border:0; background:#edf1f3; border-radius:4px; font-size:21px; }

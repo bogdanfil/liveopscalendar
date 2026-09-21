@@ -80,3 +80,16 @@ test('overlapping load requests are ignored and a valid empty sheet loads succes
   assert.equal(app.run('state.loadPhase'),'loaded');
   assert.equal(app.run('state.records.length'),0);
 });
+
+test('Calendar is accepted as Month and missing headings are explained by name',async()=>{
+  const renamed=setup(async()=>({ok:true,json:async()=>({rows:[['Calendar',...headers.slice(1)],['October','','Feature','Team','New track','1.10.26 - 20.10.26','','Description']],backgrounds:[]})}));
+  await renamed.run('loadData()');
+  assert.equal(renamed.run('state.loadPhase'),'loaded');
+  assert.equal(renamed.run('state.records[0].month'),'October');
+  assert.equal(renamed.run('state.records[0].track'),'New track');
+  const missing=setup(async()=>({ok:true,json:async()=>({rows:[['Unknown',...headers.slice(1)]],backgrounds:[]})}));
+  await missing.run('loadData()');
+  assert.equal(missing.run('state.loadPhase'),'error');
+  assert.match(missing.run('state.loadError'),/Month \(or Calendar\)/);
+  assert.match(missing.run('state.loadError'),/first row/);
+});

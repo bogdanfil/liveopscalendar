@@ -51,7 +51,7 @@ function parseRange(value) {
 function sheetColumns(headers=[]) {
   const names=headers.map(value=>String(value||'').trim().toLowerCase());
   const find=(...aliases)=>names.findIndex(name=>aliases.includes(name));
-  return { month:find('month'), event:find('event'), feature:find('feature'), team:find('development team','team'), track:find('track'), prod:find('prod dates','production dates'), dev:find('dev dates','development dates'), comment:find('comment','comments','description') };
+  return { month:find('month','calendar'), event:find('event'), feature:find('feature'), team:find('development team','team'), track:find('track'), prod:find('prod dates','production dates'), dev:find('dev dates','development dates'), comment:find('comment','comments','description') };
 }
 
 function columnLetter(index) {
@@ -81,7 +81,13 @@ function mergeDescriptions(rows, csvRows) {
 
 function normalize(rows) {
   const columns=sheetColumns(rows[0]);
-  if (['month','feature','prod','dev'].some(key=>columns[key]<0)) throw new Error('Required sheet columns are missing');
+  const required={month:'Month (or Calendar)',feature:'Feature',prod:'Prod Dates',dev:'Dev Dates'};
+  const missing=Object.keys(required).filter(key=>columns[key]<0).map(key=>required[key]);
+  if (missing.length) {
+    const error=new Error(`Required sheet columns are missing: ${missing.join(', ')}`);
+    error.missingColumns=missing;
+    throw error;
+  }
   const value=(row,key)=>String(row[columns[key]]||'').trim();
   let month="", event="";
   return rows.slice(1).map((row,index)=> {
@@ -113,6 +119,7 @@ async function fetchSheet(url,format,timeout=10000) {
 }
 
 function sheetErrorMessage(error) {
+  if (error.missingColumns) return `We couldn’t find these column headings in the sheet: ${error.missingColumns.join(', ')}. Please check the first row of the sheet and try again.`;
   if (error.status===401||error.status===403) return 'Google did not allow access to the schedule. Please ask the calendar owner to check sharing access.';
   if (error.name==='AbortError') return 'Google is taking too long to respond. Please check your connection and try again in a moment.';
   if (error instanceof TypeError) return 'We couldn’t connect to Google Sheets. Please check your internet connection and try again.';
